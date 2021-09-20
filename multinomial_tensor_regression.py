@@ -308,8 +308,11 @@ class CP_logistic_regression():
             patience (int):
                 Number of iterations with no improvement to wait
                  before early stopping.
-            verbose (bool):
-                If True, print running loss.
+            verbose (0, 1, or 2):
+                If 0, then no output.
+                If 1, then only output whether the model has
+                 converged or not.
+                If 2, then output the loss at each iteration.
             running_loss_logging_interval (int):
                 Number of iterations between logging of running loss.
             LBFGS_kwargs (dict):
@@ -350,18 +353,20 @@ class CP_logistic_regression():
             if ii%running_loss_logging_interval == 0:
                 y_hat = model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
                 self.loss_running.append(loss_fn(y_hat, self.y).item())
-                if verbose:
+                if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
 
             if ii > patience:
                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
                     convergence_reached = True
-                    print('Convergence reached')
                     break
 
             optimizer.step(closure)
-        if convergence_reached == False:
-            print('Reached maximum number of iterations without convergence')
+        if (verbose==True) or (verbose>=1):
+            if convergence_reached:
+                print('Convergence reached')
+            else:
+                print('Reached maximum number of iterations without convergence')
         return convergence_reached
     
     def predict(self, X=None, Bcp=None, device=None):
