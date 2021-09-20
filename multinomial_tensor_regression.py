@@ -120,7 +120,7 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
 
     Args:
         B_cp (list of torch.Tensor):
-            Beta Kruskal tensor.
+            Beta Kruskal tensor (before softplus).
             List of tensors of shape
              (n_features, rank).
         non_negative (list of booleans):
@@ -162,7 +162,7 @@ def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
         X (torch.Tensor):
             N-D array of data.
         Bcp (list of torch.Tensor):
-            Beta Kruskal tensor.
+            Beta Kruskal tensor (before softplus).
             List of tensors of shape 
              (n_features, rank).
         weights (list of floats):
@@ -188,6 +188,18 @@ def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
                 dim=1)
         
 def L2_penalty(B_cp):
+    """
+    Compute the L2 penalty.
+    RH2021
+
+    Args:
+        B_cp (list of torch.Tensor):
+            Beta Kruskal tensor (before softplus)
+    
+    Returns:
+        L2_penalty (torch.Tensor):
+            L2 penalty.
+    """
     ii=0
     for comp in B_cp:
         ii+= torch.sqrt(torch.sum(comp**2))
@@ -218,7 +230,6 @@ class CP_logistic_regression():
                 Rank of the CP (Kruskal) tensor used to compute the
                  beta tensor that is multiplied by X.
             non_negative (False or True or list):
-                NOT IMPLEMENTED YET.
                 If False, the CP tensor is allowed to be negative.
                 If True, the CP tensor is forced to be non-negative.
                 If a list, then the list should be length X.ndim,
@@ -229,7 +240,6 @@ class CP_logistic_regression():
                  and last dim is the classification (one hot) dim of
                  the beta tensor.
             weights (np.ndarray or torch.Tensor):
-                NOT IMPLEMENTED YET.
                 Weights for each component. Should be a
                  vector of length(rank).
             Bcp_init (list):
