@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+import matplotlib.pyplot as plt
 
 import torch
 import torch.cuda
@@ -494,4 +495,34 @@ class CP_logistic_regression():
         self.rank = params['rank']
         self.device = params['device']
 
-    
+    def plot_outputs(self):
+        """
+        Plot the outputs of the model.
+        RH 2021
+        """
+        plt.figure()
+        plt.plot(self.loss_running);
+        plt.xlabel('logged iteration')
+        plt.ylabel('loss')
+        plt.title('loss')
+
+        prob, pred = self.predict()
+        fig, axs = plt.subplots(2)
+        axs[0].imshow(idx_to_oneHot(pred, self.n_classes), aspect='auto', interpolation='none')
+        axs[1].imshow(idx_to_oneHot(self.y.detach().cpu().numpy(), self.n_classes), aspect='auto', interpolation='none')
+        axs[1].set_xlabel('class')
+        fig.suptitle('predictions')
+
+        cm = self.make_confusion_matrix(prob_or_pred='pred')
+        fig = plt.figure()
+        plt.imshow(cm)
+        plt.ylabel('true class')
+        plt.xlabel('predicted class')
+        plt.title('confusion matrix (probability)')
+
+        Bcp_final = self.return_Bcp_final()
+        fig, axs = plt.subplots(len(Bcp_final))
+        for ii, val in enumerate(Bcp_final):
+            axs[ii].set_title(f'factor {ii}')
+            axs[ii].plot(val)
+        fig.suptitle('components');
