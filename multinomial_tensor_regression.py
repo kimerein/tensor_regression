@@ -323,7 +323,8 @@ class CP_logistic_regression():
             running_loss_logging_interval=10, 
             LBFGS_kwargs=None):
         """
-        Fit a beta tensor (self.Bcp) to the data.
+        Fit a beta tensor (self.Bcp) to the data using the
+         LBFGS optimizer.
         Note that self.Bcp is not the final Kruskal tensor, 
          non_neg_fn(self.Bcp, non_negative) 
          is the final Kruskal tensor.
@@ -383,7 +384,6 @@ class CP_logistic_regression():
             
         loss_fn = torch.nn.CrossEntropyLoss()
 
-        loss_running = []
         convergence_reached = False
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
@@ -404,7 +404,85 @@ class CP_logistic_regression():
             else:
                 print('Reached maximum number of iterations without convergence')
         return convergence_reached
-    
+
+    def fit_Adam(self,
+            lambda_L2=0.01, 
+            max_iter=1000, 
+            tol=1e-5, 
+            patience=10,
+            verbose=False,
+            Adam_kwargs=None):
+        """
+        Fit a beta tensor (self.Bcp) to the data using the
+         Adam optimizer.
+        Note that self.Bcp is not the final Kruskal tensor, 
+         non_neg_fn(self.Bcp, non_negative) 
+         is the final Kruskal tensor.
+        Use self.return_Bcp_final() to get the final tensor.
+        Note that logging the loss (self.loss_running)
+         requires running the model extra times. If data is
+         large, then set running_loss_logging_interval to a
+         large number.
+        RH 2021
+
+        Args:
+            lambda_L2 (float):
+                L2 regularization parameter.
+            max_iter (int):
+                Maximum number of iterations.
+            tol (float):
+                Tolerance for the stopping criterion.
+            patience (int):
+                Number of iterations with no improvement to wait
+                 before early stopping.
+            verbose (0, 1, or 2):
+                If 0, then no output.
+                If 1, then only output whether the model has
+                 converged or not.
+            Adam_kwargs (dict):
+                Keyword arguments for Adam optimizer.
+        
+        Returns:
+            convergence_reached (bool):
+                True if convergence was reached.
+        """
+
+        if Adam_kwargs is None:
+            {
+                'lr' : 1, 
+                'betas' : (0.9, 0.999), 
+                'eps' : 1e-08, 
+                'weight_decay' : 0, 
+                'amsgrad' : False
+            }
+
+        tl.set_backend('pytorch')
+
+        optimizer = torch.optim.Adam(self.Bcp, **Adam_kwargs)
+        loss_fn = torch.nn.CrossEntropyLoss()
+
+        convergence_reached = False
+        for ii in range(max_iter):
+            optimizer.zero_grad()
+            y_hat = model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
+            loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
+            loss.backward()
+            optimizer.step()
+            self.loss_running.append(loss.item())
+            if verbose==2:
+                print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
+            if ii > patience:
+                if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
+                    convergence_reached = True
+                    break
+        if (verbose==True) or (verbose>=1):
+            if convergence_reached:
+                print('Convergence reached')
+            else:
+                print('Reached maximum number of iterations without convergence')
+        return convergence_reached
+
+
     def predict(self, X=None, Bcp=None, device=None):
         """
         Predict class labels for X given a Bcp (beta Kruskal tensor).
@@ -483,6 +561,8 @@ class CP_logistic_regression():
         Returns:
             cm (np.ndarray):
                 Confusion matrix.
+            acc (float):
+                Accuracy of the model.
         """
         prob, pred = self.predict()
         y_true = self.y.detach().cpu().numpy()
@@ -490,8 +570,11 @@ class CP_logistic_regression():
             cm = confusion_matrix(pred, y_true)
         elif prob_or_pred == 'prob':
             cm = confusion_matrix(prob, y_true)
-        return cm
+        
+        acc = np.sum(np.diag(cm))/np.sum(cm)
 
+        return cm, acc
+    
     def get_params(self):
         """
         Get the parameters of the model.
@@ -510,6 +593,10 @@ class CP_logistic_regression():
         """
         Set the parameters of the model.
         RH 2021
+
+        Args:
+            params (dict):
+                Dictionary of parameters.
         """
         self.X = params['X']
         self.y = params['y']
@@ -520,6 +607,20 @@ class CP_logistic_regression():
         self.rank = params['rank']
         self.device = params['device']
 
+    def display_params(self):
+        """
+        Display the parameters of the model.
+        RH 2021
+        """
+        print('X:', self.X.shape)
+        print('y:', self.y.shape)
+        print('weights:', self.weights)
+        print('Bcp:', self.Bcp)
+        print('non_negative:', self.non_negative)
+        print('softplus_kwargs:', self.softplus_kwargs)
+        print('rank:', self.rank)
+        print('device:', self.device)
+        
     def plot_outputs(self):
         """
         Plot the outputs of the model.
@@ -538,7 +639,7 @@ class CP_logistic_regression():
         axs[1].set_xlabel('class')
         fig.suptitle('predictions')
 
-        cm = self.make_confusion_matrix(prob_or_pred='pred')
+        cm = self.make_confusion_matrix(prob_or_pred='pred')[0]
         fig = plt.figure()
         plt.imshow(cm)
         plt.ylabel('true class')
