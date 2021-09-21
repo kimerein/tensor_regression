@@ -13,7 +13,7 @@ import tensorly as tl
 ######## Useful functions ##########
 ####################################
 
-def set_device(use_GPU=True):
+def set_device(use_GPU=True, verbose=True):
     """
     Set torch.cuda device to use.
     RH2021
@@ -26,12 +26,12 @@ def set_device(use_GPU=True):
     if use_GPU:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device != "cuda":
-            print("no GPU available. Using CPU.")
+            print("no GPU available. Using CPU.") if verbose else None
         else:
-            print("GPU is enabled.")
+            print("GPU is enabled.") if verbose else None
     else:
         device = "cpu"
-        print("using CPU")
+        print("using CPU") if verbose else None
 
     return device
     
@@ -79,6 +79,31 @@ def confusion_matrix(y_hat, y_true):
         y_hat = idx_to_oneHot(y_hat, n_classes)
     cmat = y_hat.T @ idx_to_oneHot(y_true, n_classes)
     return cmat / np.sum(cmat, axis=0)[None,:]
+
+def squeeze_integers(arr):
+    """
+    Make integers in an array consecutive numbers
+     starting from 0. ie. [7,2,7,4,1] -> [3,2,3,1,0].
+    Useful for removing unused class IDs from y_true
+     and outputting something appropriate for softmax.
+    RH2021
+
+    Args:
+        arr (np.ndarray):
+            array of integers.
+    
+    Returns:
+        arr_squeezed (np.ndarray):
+            array of integers with consecutive numbers
+    """
+    uniques = np.unique(arr)
+    arr_squeezed = copy.deepcopy(arr)
+    for val in np.arange(0, np.max(arr)+1):
+        if np.isin(val, uniques):
+            continue
+        else:
+            arr_squeezed[arr_squeezed>val] = arr_squeezed[arr_squeezed>val]-1
+    return arr_squeezed
 
 
 ####################################
@@ -518,7 +543,7 @@ class CP_logistic_regression():
         plt.imshow(cm)
         plt.ylabel('true class')
         plt.xlabel('predicted class')
-        plt.title('confusion matrix (probability)')
+        plt.title('confusion matrix (predictions)')
 
         Bcp_final = self.return_Bcp_final()
         fig, axs = plt.subplots(len(Bcp_final))
