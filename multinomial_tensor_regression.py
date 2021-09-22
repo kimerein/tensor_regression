@@ -512,6 +512,10 @@ class CP_logistic_regression():
                 Raw output of the model.
             preds (np.ndarray):
                 Predicted class labels.
+            cm (np.ndarray):
+                Confusion matrix.
+            acc (float):
+                Accuracy.
         """
         if device is None:
             device = self.device
@@ -522,7 +526,6 @@ class CP_logistic_regression():
             X = torch.tensor(X, dtype=torch.float32, requires_grad=False).to(device)
         elif X.device != device:
             X = X.to(device)
-        print(X.shape)
 
         if y_true is None:
             y_true = self.y.detach().cpu().numpy()
@@ -538,9 +541,10 @@ class CP_logistic_regression():
                 Bcp[ii] = Bcp[ii].to(device)
 
         logit = model(X, Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
-        print(logit.shape)
         pred = np.argmax(logit, axis=1)
         pred_onehot = idx_to_oneHot(pred, self.n_classes)
+
+        cm, acc = self.make_confusion_matrix(prob_or_pred='pred', pred=pred, y_true=y_true)
 
         if plot_pref:
             fig, axs = plt.subplots(2)
@@ -549,14 +553,13 @@ class CP_logistic_regression():
             axs[1].set_xlabel('class')
             fig.suptitle('predictions')
 
-            cm = self.make_confusion_matrix(prob_or_pred='pred', pred=pred, y_true=y_true)[0]
             fig = plt.figure()
             plt.imshow(cm)
             plt.ylabel('true class')
             plt.xlabel('predicted class')
             plt.title('confusion matrix (predictions)')
             
-        return logit, pred
+        return logit, pred, cm, acc
 
     
     def return_Bcp_final(self):
