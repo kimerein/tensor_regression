@@ -483,7 +483,7 @@ class CP_logistic_regression():
         return convergence_reached
 
 
-    def predict(self, X=None, Bcp=None, device=None):
+    def predict(self, X=None, y_true=None, Bcp=None, device=None, plot_pref=False):
         """
         Predict class labels for X given a Bcp (beta Kruskal tensor).
         Uses 'model' function in this module.
@@ -498,8 +498,14 @@ class CP_logistic_regression():
                 List of Bcp matrices.
                 If None, then use the Bcp that was passed to the
                  constructor.
+            y_true (np.ndarray or torch.Tensor):
+                True class labels. Only necessary if plot_pref is
+                 True and inputting data from a different X than
+                 what the model was trained on.
             device (str):
                 Device to run the model on.
+            plot_pref (bool):
+                If True, then make plots
         
         Returns:
             logits (np.ndarray):
@@ -516,7 +522,12 @@ class CP_logistic_regression():
             X = torch.tensor(X, dtype=torch.float32, requires_grad=False).to(device)
         elif X.device != device:
             X = X.to(device)
-            
+        print(X.shape)
+
+        if y_true is None:
+            y_true = self.y.detach().cpu().numpy()
+
+                        
         if Bcp is None:
             Bcp = self.Bcp
         elif isinstance(Bcp[0], torch.Tensor) == False:
@@ -527,8 +538,24 @@ class CP_logistic_regression():
                 Bcp[ii] = Bcp[ii].to(device)
 
         logit = model(X, Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
+        print(logit.shape)
         pred = np.argmax(logit, axis=1)
         pred_onehot = idx_to_oneHot(pred, self.n_classes)
+
+        if plot_pref:
+            fig, axs = plt.subplots(2)
+            axs[0].imshow(idx_to_oneHot(pred, self.n_classes), aspect='auto', interpolation='none')
+            axs[1].imshow(idx_to_oneHot(y_true, self.n_classes), aspect='auto', interpolation='none')
+            axs[1].set_xlabel('class')
+            fig.suptitle('predictions')
+
+            cm = self.make_confusion_matrix(prob_or_pred='pred', pred=pred, y_true=y_true)[0]
+            fig = plt.figure()
+            plt.imshow(cm)
+            plt.ylabel('true class')
+            plt.xlabel('predicted class')
+            plt.title('confusion matrix (predictions)')
+            
         return logit, pred
 
     
@@ -547,9 +574,11 @@ class CP_logistic_regression():
         Bcp_nonNeg = [Bcp[ii].detach().cpu().numpy() for ii in range(len(Bcp))]
         return Bcp_nonNeg
 
-    def make_confusion_matrix(self, prob_or_pred='pred'):
+    def make_confusion_matrix(self, prob_or_pred='pred', prob=None, pred=None, y_true=None):
         """
         Make a confusion matrix.
+        If 'prob' and 'pred' are None, then they will
+         be calculated using self.predict().
         RH 2021
 
         Args:
@@ -557,6 +586,10 @@ class CP_logistic_regression():
                 'prob' or 'pred'. If 'prob', then use the
                  probabilities of the model. If 'pred', then
                  use the predicted class labels.
+            prob (np.ndarray):
+                Probabilities of the model.
+            pred (np.ndarray):
+                Predicted class labels.
 
         Returns:
             cm (np.ndarray):
@@ -564,8 +597,12 @@ class CP_logistic_regression():
             acc (float):
                 Accuracy of the model.
         """
-        prob, pred = self.predict()
-        y_true = self.y.detach().cpu().numpy()
+        if (prob is None) and (pred is None):
+            prob, pred = self.predict()
+        
+        if y_true is None:
+            y_true = self.y.detach().cpu().numpy()
+        
         if prob_or_pred == 'pred':
             cm = confusion_matrix(pred, y_true)
         elif prob_or_pred == 'prob':
