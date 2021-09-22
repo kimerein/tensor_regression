@@ -601,7 +601,7 @@ class CP_logistic_regression():
                 Accuracy of the model.
         """
         if (prob is None) and (pred is None):
-            prob, pred = self.predict()
+            prob, pred, cm, acc = self.predict()
         
         if y_true is None:
             y_true = self.y.detach().cpu().numpy()
@@ -672,14 +672,14 @@ class CP_logistic_regression():
         plt.ylabel('loss')
         plt.title('loss')
 
-        prob, pred = self.predict()
+        prob, pred, cm, acc = self.predict()
         fig, axs = plt.subplots(2)
         axs[0].imshow(idx_to_oneHot(pred, self.n_classes), aspect='auto', interpolation='none')
         axs[1].imshow(idx_to_oneHot(self.y.detach().cpu().numpy(), self.n_classes), aspect='auto', interpolation='none')
         axs[1].set_xlabel('class')
         fig.suptitle('predictions')
 
-        cm = self.make_confusion_matrix(prob_or_pred='pred')[0]
+        cm, acc = self.make_confusion_matrix(prob_or_pred='pred')
         fig = plt.figure()
         plt.imshow(cm)
         plt.ylabel('true class')
