@@ -171,10 +171,52 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
         else:
             yield B_cp[ii]
 
-def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
+# def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
+#     """
+#     Compute the regression model.
+#     y_hat = softmax(inner(X, outer(softplus(Bcp)), n_modes=len(Bcp)-1))
+#     where:
+#         X.shape[1:] == Bcp.shape[:-1]
+#         X.shape[0] == len(y_hat)
+#         Bcp.shape[-1] == len(unique(y_true))
+#         softplus is performed only on specified dimensions of Bcp.
+#         inner prod is performed on dims [1:] of X and
+#          dims [:-1] of Bcp.
+#     RH2021
+
+#     Args:
+#         X (torch.Tensor):
+#             N-D array of data.
+#         Bcp (list of torch.Tensor):
+#             Beta Kruskal tensor (before softplus).
+#             List of tensors of shape 
+#              (n_features, rank).
+#         weights (list of floats):
+#             List of weights for each component.
+#             len(weights) == rank == Bcp[0].shape[1]
+#         non_negative (list of booleans):
+#             List of booleans indicating whether each component
+#              is non-negative.
+#         softplus_kwargs (dict):
+#             Keyword arguments for torch.nn.functional.softplus.
+    
+#     Returns:
+#         y_hat (torch.Tensor):
+#             N-D array of predictions.
+#     """
+#     return torch.nn.functional.softmax(
+#                 tl.tenalg.inner(X,
+#                     tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
+#                                                                 Bcp,
+#                                                                 non_negative,
+#                                                                 softplus_kwargs)) )),
+#                     n_modes=len(Bcp)-1),
+#                 dim=1)
+    
+def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
     """
     Compute the regression model.
-    y_hat = softmax(inner(X, outer(softplus(Bcp)), n_modes=len(Bcp)-1))
+    y_hat = inner(X, outer(softplus(Bcp))
     where:
         X.shape[1:] == Bcp.shape[:-1]
         X.shape[0] == len(y_hat)
@@ -204,14 +246,15 @@ def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
         y_hat (torch.Tensor):
             N-D array of predictions.
     """
-    return torch.nn.functional.softmax(
-                tl.tenalg.inner(X,
-                    tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
+    return tl.tenalg.inner(X,
+                           tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
                                                                 Bcp,
                                                                 non_negative,
-                                                                softplus_kwargs)) )),
-                    n_modes=len(Bcp)-1),
-                dim=1)
+                                                                softplus_kwargs))
+                                                     ))
+                        )
+    
+    
         
 def L2_penalty(B_cp):
     """
@@ -236,7 +279,7 @@ def L2_penalty(B_cp):
 ########### Main class #############
 ####################################
 
-class CP_logistic_regression():
+class CP_linear_regression():
     def __init__(self, X, y, rank=5, non_negative=False, weights=None, Bcp_init=None, Bcp_init_scale=1, device='cpu', softplus_kwargs=None):
         """
         Multinomial logistic CP tensor regression class.
@@ -306,7 +349,7 @@ class CP_logistic_regression():
 
         
         self.n_classes = len(torch.unique(self.y))
-        B_dims = np.concatenate((np.array(self.X.shape[1:]), [self.n_classes]))
+        B_dims = np.concatenate((np.array(self.X.shape[1:]), [1]))
         if Bcp_init is None:
             self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, scale=Bcp_init_scale, device=self.device)
         else:
@@ -377,7 +420,7 @@ class CP_logistic_regression():
 
         def closure():
             optimizer.zero_grad()
-            y_hat = model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
+            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
             loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             return loss
@@ -387,7 +430,7 @@ class CP_logistic_regression():
         convergence_reached = False
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
-                y_hat = model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
+                y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
                 self.loss_running.append(loss_fn(y_hat, self.y).item())
                 if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
@@ -459,12 +502,12 @@ class CP_logistic_regression():
         tl.set_backend('pytorch')
 
         optimizer = torch.optim.Adam(self.Bcp, **Adam_kwargs)
-        loss_fn = torch.nn.CrossEntropyLoss()
+        loss_fn = torch.nn.MSELoss()
 
         convergence_reached = False
         for ii in range(max_iter):
             optimizer.zero_grad()
-            y_hat = model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
+            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
             loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             optimizer.step()
@@ -540,7 +583,7 @@ class CP_logistic_regression():
             for ii in range(len(Bcp)):
                 Bcp[ii] = Bcp[ii].to(device)
 
-        logit = model(X, Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
+        logit = lin_model(X, Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
         pred = np.argmax(logit, axis=1)
         pred_onehot = idx_to_oneHot(pred, self.n_classes)
 
