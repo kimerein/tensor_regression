@@ -35,51 +35,6 @@ def set_device(use_GPU=True, verbose=True):
 
     return device
     
-def idx_to_oneHot(arr, n_classes=None):
-    """
-    Convert an array of class indices to matrix of
-     one-hot vectors.
-    RH2021
-
-    Args:
-        arr (np.ndarray):
-            1-D array of class indices.
-        n_classes (int):
-            Number of classes.
-    
-    Returns:
-        oneHot (np.ndarray):
-            2-D array of one-hot vectors.
-    """
-    if n_classes is None:
-        n_classes = np.max(arr)+1
-    oneHot = np.zeros((arr.size, n_classes))
-    oneHot[np.arange(arr.size), arr] = 1
-    return oneHot
-
-def confusion_matrix(y_hat, y_true):
-    """
-    Compute the confusion matrix from y_hat and y_true.
-    y_hat should be either predictions ().
-    RH2021
-
-    Args:
-        y_hat (np.ndarray): 
-            numpy array of predictions or probabilities. 
-            Either PREDICTIONS: 2-D array of booleans
-             ('one hots') or 1-D array of predicted 
-             class indices.
-            Or PROBABILITIES: 2-D array floats ('one hot
-             like')
-        y_true (np.ndarray):
-            1-D array of true class indices.
-    """
-    n_classes = np.max(y_true)+1
-    if y_hat.ndim == 1:
-        y_hat = idx_to_oneHot(y_hat, n_classes)
-    cmat = y_hat.T @ idx_to_oneHot(y_true, n_classes)
-    return cmat / np.sum(cmat, axis=0)[None,:]
-
 def squeeze_integers(arr):
     """
     Make integers in an array consecutive numbers
@@ -171,48 +126,6 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
         else:
             yield B_cp[ii]
 
-# def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
-#     """
-#     Compute the regression model.
-#     y_hat = softmax(inner(X, outer(softplus(Bcp)), n_modes=len(Bcp)-1))
-#     where:
-#         X.shape[1:] == Bcp.shape[:-1]
-#         X.shape[0] == len(y_hat)
-#         Bcp.shape[-1] == len(unique(y_true))
-#         softplus is performed only on specified dimensions of Bcp.
-#         inner prod is performed on dims [1:] of X and
-#          dims [:-1] of Bcp.
-#     RH2021
-
-#     Args:
-#         X (torch.Tensor):
-#             N-D array of data.
-#         Bcp (list of torch.Tensor):
-#             Beta Kruskal tensor (before softplus).
-#             List of tensors of shape 
-#              (n_features, rank).
-#         weights (list of floats):
-#             List of weights for each component.
-#             len(weights) == rank == Bcp[0].shape[1]
-#         non_negative (list of booleans):
-#             List of booleans indicating whether each component
-#              is non-negative.
-#         softplus_kwargs (dict):
-#             Keyword arguments for torch.nn.functional.softplus.
-    
-#     Returns:
-#         y_hat (torch.Tensor):
-#             N-D array of predictions.
-#     """
-#     return torch.nn.functional.softmax(
-#                 tl.tenalg.inner(X,
-#                     tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
-#                                                                 Bcp,
-#                                                                 non_negative,
-#                                                                 softplus_kwargs)) )),
-#                     n_modes=len(Bcp)-1),
-#                 dim=1)
-    
 def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
     """
     Compute the regression model.
@@ -224,7 +137,7 @@ def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
         softplus is performed only on specified dimensions of Bcp.
         inner prod is performed on dims [1:] of X and
          dims [:-1] of Bcp.
-    RH2021
+    JZ2021
 
     Args:
         X (torch.Tensor):
@@ -246,14 +159,15 @@ def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
         y_hat (torch.Tensor):
             N-D array of predictions.
     """
+    
     return tl.tenalg.inner(X,
                            tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
                                                                 Bcp,
                                                                 non_negative,
                                                                 softplus_kwargs))
-                                                     ))
+                                                     )),
+                           n_modes=len(Bcp)-1
                         )
-    
     
         
 def L2_penalty(B_cp):
@@ -325,7 +239,7 @@ class CP_linear_regression():
         """        
 
         self.X = torch.tensor(X, dtype=torch.float32).to(device)
-        self.y = torch.tensor(y, dtype=torch.long).to(device)
+        self.y = torch.tensor(y, dtype=torch.float32).to(device)
         
         if weights is None:
             self.weights = torch.ones((rank), device=device)
@@ -421,17 +335,17 @@ class CP_linear_regression():
         def closure():
             optimizer.zero_grad()
             y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
+            loss = loss_fn(y_hat.reshape(-1), self.y.reshape(-1)) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             return loss
             
-        loss_fn = torch.nn.CrossEntropyLoss()
+        loss_fn = torch.nn.MSELoss()
 
         convergence_reached = False
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
                 y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
-                self.loss_running.append(loss_fn(y_hat, self.y).item())
+                self.loss_running.append(loss_fn(y_hat.reshape(-1), self.y.reshape(-1)).item())
                 if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
 
@@ -583,26 +497,9 @@ class CP_linear_regression():
             for ii in range(len(Bcp)):
                 Bcp[ii] = Bcp[ii].to(device)
 
-        logit = lin_model(X, Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
-        pred = np.argmax(logit, axis=1)
-        pred_onehot = idx_to_oneHot(pred, self.n_classes)
-
-        cm, acc = self.make_confusion_matrix(prob_or_pred='pred', pred=pred, y_true=y_true)
-
-        if plot_pref:
-            fig, axs = plt.subplots(2)
-            axs[0].imshow(idx_to_oneHot(pred, self.n_classes), aspect='auto', interpolation='none')
-            axs[1].imshow(idx_to_oneHot(y_true, self.n_classes), aspect='auto', interpolation='none')
-            axs[1].set_xlabel('class')
-            fig.suptitle('predictions')
-
-            fig = plt.figure()
-            plt.imshow(cm)
-            plt.ylabel('true class')
-            plt.xlabel('predicted class')
-            plt.title('confusion matrix (predictions)')
+        y_hat = lin_model(X, Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
             
-        return logit, pred, cm, acc
+        return y_hat
 
     
     def return_Bcp_final(self):
@@ -619,44 +516,6 @@ class CP_linear_regression():
         Bcp = list(non_neg_fn(self.Bcp, self.non_negative, softplus_kwargs=self.softplus_kwargs))
         Bcp_nonNeg = [Bcp[ii].detach().cpu().numpy() for ii in range(len(Bcp))]
         return Bcp_nonNeg
-
-    def make_confusion_matrix(self, prob_or_pred='pred', prob=None, pred=None, y_true=None):
-        """
-        Make a confusion matrix.
-        If 'prob' and 'pred' are None, then they will
-         be calculated using self.predict().
-        RH 2021
-
-        Args:
-            prob_or_pred (str):
-                'prob' or 'pred'. If 'prob', then use the
-                 probabilities of the model. If 'pred', then
-                 use the predicted class labels.
-            prob (np.ndarray):
-                Probabilities of the model.
-            pred (np.ndarray):
-                Predicted class labels.
-
-        Returns:
-            cm (np.ndarray):
-                Confusion matrix.
-            acc (float):
-                Accuracy of the model.
-        """
-        if (prob is None) and (pred is None):
-            prob, pred, cm, acc = self.predict()
-        
-        if y_true is None:
-            y_true = self.y.detach().cpu().numpy()
-        
-        if prob_or_pred == 'pred':
-            cm = confusion_matrix(pred, y_true)
-        elif prob_or_pred == 'prob':
-            cm = confusion_matrix(prob, y_true)
-        
-        acc = np.sum(np.diag(cm))/np.sum(cm)
-
-        return cm, acc
     
     def get_params(self):
         """
@@ -710,28 +569,102 @@ class CP_linear_regression():
         RH 2021
         """
         plt.figure()
-        plt.plot(self.loss_running);
+        plt.plot(self.loss_running)
         plt.xlabel('logged iteration')
         plt.ylabel('loss')
         plt.title('loss')
-
-        prob, pred, cm, acc = self.predict()
-        fig, axs = plt.subplots(2)
-        axs[0].imshow(idx_to_oneHot(pred, self.n_classes), aspect='auto', interpolation='none')
-        axs[1].imshow(idx_to_oneHot(self.y.detach().cpu().numpy(), self.n_classes), aspect='auto', interpolation='none')
-        axs[1].set_xlabel('class')
-        fig.suptitle('predictions')
-
-        cm, acc = self.make_confusion_matrix(prob_or_pred='pred')
-        fig = plt.figure()
-        plt.imshow(cm)
-        plt.ylabel('true class')
-        plt.xlabel('predicted class')
-        plt.title('confusion matrix (predictions)')
 
         Bcp_final = self.return_Bcp_final()
         fig, axs = plt.subplots(len(Bcp_final))
         for ii, val in enumerate(Bcp_final):
             axs[ii].set_title(f'factor {ii}')
             axs[ii].plot(val)
-        fig.suptitle('components');
+        fig.suptitle('components')
+
+
+if __name__ == '__main__':
+    import torch
+    import numpy as np
+    import tensorly as tl
+    import scipy.signal
+    import matplotlib.pyplot as plt
+
+    import sys
+    sys.path.append(r'..')
+
+    import tensorly as tl
+
+    torch.manual_seed(321)
+    np.random.seed(321)
+
+    X_dims_fake = [2000, 500, 500]
+    nClasses_fake = 5
+
+    # y_true  = np.random.randint(0, nClasses_fake, X_dims_fake[0])
+    # y_true_oneHot = mtr.idx_to_oneHot(y_true, nClasses_fake)
+
+    Xcp_underlying_fake = [
+                        torch.rand(X_dims_fake[0], 4)-0.5,
+                        torch.vstack([torch.sin(torch.linspace(0, 140, X_dims_fake[1])),
+                                        torch.cos(torch.linspace(2,19,X_dims_fake[1])),
+                                        torch.linspace(0,1,X_dims_fake[1]),
+                                        torch.cos(torch.linspace(0,17,X_dims_fake[1])) >0]).T ,
+                        torch.tensor(scipy.signal.savgol_filter(np.random.rand(X_dims_fake[2], 4), 15, 3, axis=0))-0.5,
+                        ]
+    # Bcp_underlying_fake = Xcp_underlying_fake[1:] + [torch.rand(nClasses_fake, 4) -0.5]
+    Bcp_underlying_fake = Xcp_underlying_fake[1:] + [torch.ones(1, 4) -0.5]
+
+    tl.set_backend('pytorch')
+    X_fake = tl.cp_tensor.cp_to_tensor((np.ones(4), Xcp_underlying_fake))
+
+    y_hat = tl.tenalg.inner(X_fake,
+                        tl.cp_tensor.cp_to_tensor((np.ones(4), Bcp_underlying_fake )),
+                        n_modes=len(Bcp_underlying_fake)-1)
+
+    X = X_fake.numpy()
+    X = (X - np.mean(X, axis=1)[:,None,:])
+    y = y_hat.numpy()
+    DEVICE = set_device(use_GPU=True)
+
+    # h_vals = np.logspace(-50, 2, num=30, endpoint=True, base=10.0)
+    # h_vals = np.int64(np.linspace(1, 300, num=30, endpoint=True))
+    h_vals = np.arange(1)
+
+    loss_all = []
+    for ii, val in enumerate(h_vals):
+        print(f'hyperparameter val: {val}')
+        cpmlr = CP_linear_regression(X, y, 
+                                            rank=1,
+                                            non_negative=[False, False, False],
+                                            weights=None,
+                                            Bcp_init=None,
+                                            Bcp_init_scale=1,
+                                            device=DEVICE,
+                                            softplus_kwargs={
+                                                'beta': 50,
+                                                'threshold':1}
+                                            )
+
+        # tic = time.time()
+        cpmlr.fit(lambda_L2=0.003, 
+                    max_iter=200, 
+                    tol=1e-50, 
+                    patience=10,
+                    verbose=1,
+                    running_loss_logging_interval=1,
+                    LBFGS_kwargs={
+                        'lr' : 1, 
+                        'max_iter' : 20, 
+                        'max_eval' : None, 
+                        'tolerance_grad' : 1e-07, 
+                        'tolerance_change' : 1e-09, 
+                        'history_size' : 100, 
+                        'line_search_fn' : "strong_wolfe"
+                    }
+                )
+
+        print(f'loss: {cpmlr.loss_running[-1]}')
+        
+        loss_all.append(cpmlr.loss_running[-1])
+
+    pass
