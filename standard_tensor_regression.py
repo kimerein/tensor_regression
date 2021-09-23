@@ -422,7 +422,7 @@ class CP_linear_regression():
         for ii in range(max_iter):
             optimizer.zero_grad()
             y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
+            loss = loss_fn(y_hat.reshape(-1), self.y.reshape(-1)) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             optimizer.step()
             self.loss_running.append(loss.item())
