@@ -16,7 +16,7 @@ import tensorly as tl
 def set_device(use_GPU=True, verbose=True):
     """
     Set torch.cuda device to use.
-    RH2021
+    RH 2021
 
     Args:
         use_GPU (int):
@@ -41,7 +41,7 @@ def squeeze_integers(arr):
      starting from 0. ie. [7,2,7,4,1] -> [3,2,3,1,0].
     Useful for removing unused class IDs from y_true
      and outputting something appropriate for softmax.
-    RH2021
+    RH 2021
 
     Args:
         arr (np.ndarray):
@@ -68,7 +68,7 @@ def squeeze_integers(arr):
 def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
     """
     Make initial Beta Kruskal tensor.
-    RH2021
+    RH 2021
     
     Args:
         B_dims (list of ints):
@@ -88,7 +88,8 @@ def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
         B_cp (list of torch.Tensor):
             Beta Kruskal tensor.
     """
-    Bcp_init = [(torch.rand((B_dims[ii], rank))*scale - non_negative[ii]*(scale/2)).to(device) for ii in range(len(B_dims))]
+    # Bcp_init = [torch.nn.init.kaiming_uniform_(torch.empty(B_dims[ii], rank), a=0, mode='fan_in').to(device) for ii in range(len(B_dims))]
+    Bcp_init = [(torch.rand((B_dims[ii], rank))*scale - (1-non_negative[ii])*(scale/2)).to(device) for ii in range(len(B_dims))]
     for ii in range(len(B_dims)):
         Bcp_init[ii].requires_grad = True
     return Bcp_init
@@ -97,7 +98,7 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
     """
     Apply softplus to specified dimensions of Bcp.
     Generator function that yields a list of tensors.
-    RH2021
+    RH 2021
 
     Args:
         B_cp (list of torch.Tensor):
@@ -137,7 +138,7 @@ def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
         softplus is performed only on specified dimensions of Bcp.
         inner prod is performed on dims [1:] of X and
          dims [:-1] of Bcp.
-    JZ2021
+    JZ2021 / RH 2021
 
     Args:
         X (torch.Tensor):
@@ -165,15 +166,15 @@ def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
                                                                 Bcp,
                                                                 non_negative,
                                                                 softplus_kwargs))
-                                                     )),
-                           n_modes=len(Bcp)-1
-                        )
+                                                     ))[...,None],
+                           n_modes=len(Bcp)
+                        ).squeeze()
     
         
 def L2_penalty(B_cp):
     """
     Compute the L2 penalty.
-    RH2021
+    RH 2021
 
     Args:
         B_cp (list of torch.Tensor):
@@ -242,7 +243,7 @@ class CP_linear_regression():
         self.y = torch.tensor(y, dtype=torch.float32).to(device)
         
         if weights is None:
-            self.weights = torch.ones((rank), device=device)
+            self.weights = torch.ones((rank), requires_grad=False, device=device)
         else:
             self.weights = torch.tensor(weights)
 
@@ -263,7 +264,7 @@ class CP_linear_regression():
 
         
         self.n_classes = len(torch.unique(self.y))
-        B_dims = np.concatenate((np.array(self.X.shape[1:]), [1]))
+        B_dims = np.array(self.X.shape[1:])
         if Bcp_init is None:
             self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, scale=Bcp_init_scale, device=self.device)
         else:
@@ -335,7 +336,7 @@ class CP_linear_regression():
         def closure():
             optimizer.zero_grad()
             y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat.reshape(-1), self.y.reshape(-1)) + lambda_L2 * L2_penalty(self.Bcp)
+            loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             return loss
             
@@ -345,7 +346,7 @@ class CP_linear_regression():
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
                 y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
-                self.loss_running.append(loss_fn(y_hat.reshape(-1), self.y.reshape(-1)).item())
+                self.loss_running.append(loss_fn(y_hat, self.y).item())
                 if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
 
@@ -422,7 +423,7 @@ class CP_linear_regression():
         for ii in range(max_iter):
             optimizer.zero_grad()
             y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat.reshape(-1), self.y.reshape(-1)) + lambda_L2 * L2_penalty(self.Bcp)
+            loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             optimizer.step()
             self.loss_running.append(loss.item())
@@ -529,7 +530,8 @@ class CP_linear_regression():
                 'non_negative': self.non_negative,
                 'softplus_kwargs': self.softplus_kwargs,
                 'rank': self.rank,
-                'device': self.device}
+                'device': self.device,
+                'loss_running': self.loss_running}
 
     def set_params(self, params):
         """
@@ -548,6 +550,7 @@ class CP_linear_regression():
         self.softplus_kwargs = params['softplus_kwargs']
         self.rank = params['rank']
         self.device = params['device']
+        self.loss_running = params['loss_running']
 
     def display_params(self):
         """
@@ -562,6 +565,7 @@ class CP_linear_regression():
         print('softplus_kwargs:', self.softplus_kwargs)
         print('rank:', self.rank)
         print('device:', self.device)
+        print('loss_running:', self.loss_running)
         
     def plot_outputs(self):
         """

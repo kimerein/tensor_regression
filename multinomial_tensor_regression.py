@@ -16,7 +16,7 @@ import tensorly as tl
 def set_device(use_GPU=True, verbose=True):
     """
     Set torch.cuda device to use.
-    RH2021
+    RH 2021
 
     Args:
         use_GPU (int):
@@ -39,7 +39,7 @@ def idx_to_oneHot(arr, n_classes=None):
     """
     Convert an array of class indices to matrix of
      one-hot vectors.
-    RH2021
+    RH 2021
 
     Args:
         arr (np.ndarray):
@@ -61,7 +61,7 @@ def confusion_matrix(y_hat, y_true):
     """
     Compute the confusion matrix from y_hat and y_true.
     y_hat should be either predictions ().
-    RH2021
+    RH 2021
 
     Args:
         y_hat (np.ndarray): 
@@ -86,7 +86,7 @@ def squeeze_integers(arr):
      starting from 0. ie. [7,2,7,4,1] -> [3,2,3,1,0].
     Useful for removing unused class IDs from y_true
      and outputting something appropriate for softmax.
-    RH2021
+    RH 2021
 
     Args:
         arr (np.ndarray):
@@ -113,7 +113,7 @@ def squeeze_integers(arr):
 def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
     """
     Make initial Beta Kruskal tensor.
-    RH2021
+    RH 2021
     
     Args:
         B_dims (list of ints):
@@ -133,7 +133,7 @@ def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
         B_cp (list of torch.Tensor):
             Beta Kruskal tensor.
     """
-    Bcp_init = [(torch.rand((B_dims[ii], rank))*scale - non_negative[ii]*(scale/2)).to(device) for ii in range(len(B_dims))]
+    Bcp_init = [(torch.rand((B_dims[ii], rank))*scale - (1-non_negative[ii])*(scale/2)).to(device) for ii in range(len(B_dims))]
     for ii in range(len(B_dims)):
         Bcp_init[ii].requires_grad = True
     return Bcp_init
@@ -142,7 +142,7 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
     """
     Apply softplus to specified dimensions of Bcp.
     Generator function that yields a list of tensors.
-    RH2021
+    RH 2021
 
     Args:
         B_cp (list of torch.Tensor):
@@ -182,7 +182,7 @@ def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
         softplus is performed only on specified dimensions of Bcp.
         inner prod is performed on dims [1:] of X and
          dims [:-1] of Bcp.
-    RH2021
+    RH 2021
 
     Args:
         X (torch.Tensor):
@@ -216,7 +216,7 @@ def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
 def L2_penalty(B_cp):
     """
     Compute the L2 penalty.
-    RH2021
+    RH 2021
 
     Args:
         B_cp (list of torch.Tensor):
@@ -627,7 +627,8 @@ class CP_logistic_regression():
                 'non_negative': self.non_negative,
                 'softplus_kwargs': self.softplus_kwargs,
                 'rank': self.rank,
-                'device': self.device}
+                'device': self.device,
+                'loss_running': self.loss_running}
 
     def set_params(self, params):
         """
@@ -646,6 +647,7 @@ class CP_logistic_regression():
         self.softplus_kwargs = params['softplus_kwargs']
         self.rank = params['rank']
         self.device = params['device']
+        self.loss_running = params['loss_running']
 
     def display_params(self):
         """
@@ -660,6 +662,7 @@ class CP_logistic_regression():
         print('softplus_kwargs:', self.softplus_kwargs)
         print('rank:', self.rank)
         print('device:', self.device)
+        print('loss_running:', self.loss_running)
         
     def plot_outputs(self):
         """
