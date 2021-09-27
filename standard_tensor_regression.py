@@ -127,7 +127,7 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
         else:
             yield B_cp[ii]
 
-def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
+def lin_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
     """
     Compute the regression model.
     y_hat = inner(X, outer(softplus(Bcp))
@@ -153,6 +153,8 @@ def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
         non_negative (list of booleans):
             List of booleans indicating whether each component
              is non-negative.
+        bias (float):
+            Bias term. Scalar.
         softplus_kwargs (dict):
             Keyword arguments for torch.nn.functional.softplus.
     
@@ -168,7 +170,7 @@ def lin_model(X, Bcp, weights, non_negative, softplus_kwargs=None):
                                                                 softplus_kwargs))
                                                      ))[...,None],
                            n_modes=len(Bcp)
-                        ).squeeze()
+                        ).squeeze() + bias
     
         
 def L2_penalty(B_cp):
@@ -195,7 +197,7 @@ def L2_penalty(B_cp):
 ####################################
 
 class CP_linear_regression():
-    def __init__(self, X, y, rank=5, non_negative=False, weights=None, Bcp_init=None, Bcp_init_scale=1, device='cpu', softplus_kwargs=None):
+    def __init__(self, X, y, rank=5, non_negative=False, weights=None, Bcp_init=None, Bcp_init_scale=1, bias_init=0, device='cpu', softplus_kwargs=None):
         """
         Multinomial logistic CP tensor regression class.
         Bias is not considered in this model because there
@@ -235,6 +237,8 @@ class CP_linear_regression():
             Bcp_init_scale (float):
                 Optional. Scale of uniform distribution used to
                  initialize each component of Bcp.
+            bias_init (float):
+                Optional. Initial bias. Scalar.
             device (str):
                 Device to run the model on.
         """        
@@ -261,6 +265,8 @@ class CP_linear_regression():
             self.non_negative = [False]*(self.X.ndim)
         else:
             self.non_negative = non_negative        
+
+        self.bias = torch.ones(1, requires_grad=True, device=device) * bias_init
 
         
         self.n_classes = len(torch.unique(self.y))
@@ -331,11 +337,11 @@ class CP_linear_regression():
 
         tl.set_backend('pytorch')
 
-        optimizer = torch.optim.LBFGS(self.Bcp, **LBFGS_kwargs)
+        optimizer = torch.optim.LBFGS(self.Bcp + [self.bias], **LBFGS_kwargs)
 
         def closure():
             optimizer.zero_grad()
-            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
+            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
             loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             return loss
@@ -345,7 +351,7 @@ class CP_linear_regression():
         convergence_reached = False
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
-                y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
+                y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
                 self.loss_running.append(loss_fn(y_hat, self.y).item())
                 if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
@@ -422,7 +428,7 @@ class CP_linear_regression():
         convergence_reached = False
         for ii in range(max_iter):
             optimizer.zero_grad()
-            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
+            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
             loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             optimizer.step()
@@ -498,7 +504,7 @@ class CP_linear_regression():
             for ii in range(len(Bcp)):
                 Bcp[ii] = Bcp[ii].to(device)
 
-        y_hat = lin_model(X, Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
+        y_hat = lin_model(X, Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
             
         return y_hat
 
