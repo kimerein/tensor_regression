@@ -1,6 +1,7 @@
 # tensor_regression
-Pytorch functions for performing tensor regression. Still under development. Message me if you'd like to help in its development: RichHakim@gmail.com
+Pytorch functions for performing tensor regression. Still under development. Message me if you'd like to help in its development: RichHakim@gmail.com 
 
+These methods are very useful for regression of time series data. I use them to classify and predict neural and behavioral time series data.
 
 
 ## Standard CP tensor regression:
