@@ -266,7 +266,8 @@ class CP_linear_regression():
         else:
             self.non_negative = non_negative        
 
-        self.bias = torch.ones(1, requires_grad=True, device=device) * bias_init
+        print(bias_init)
+        self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
 
         
         self.n_classes = len(torch.unique(self.y))
@@ -524,15 +525,27 @@ class CP_linear_regression():
         Bcp_nonNeg = [Bcp[ii].detach().cpu().numpy() for ii in range(len(Bcp))]
         return Bcp_nonNeg
     
+    def detach_Bcp(self):
+        """
+        Detach the Bcp Kruskal tensor list.
+        RH 2021
+
+        Returns:
+            Bcp_detached (list of np.ndarray):
+                Detached Bcp tensors.
+        """
+        Bcp_detached = [Bcp.detach().cpu().numpy() for Bcp in self.Bcp]
+        return Bcp_detached
+
     def get_params(self):
         """
         Get the parameters of the model.
         RH 2021
         """
-        return {'X': self.X,
-                'y': self.y,
-                'weights': self.weights,
-                'Bcp': self.Bcp,
+        return {'X': self.X.detach().cpu().numpy(),
+                'y': self.y.detach().cpu().numpy(),
+                'weights': self.weights.detach().cpu().numpy(),
+                'Bcp': self.detach_Bcp(),
                 'non_negative': self.non_negative,
                 'softplus_kwargs': self.softplus_kwargs,
                 'rank': self.rank,

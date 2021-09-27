@@ -615,15 +615,27 @@ class CP_logistic_regression():
 
         return cm, acc
     
+    def detach_Bcp(self):
+        """
+        Detach the Bcp Kruskal tensor list.
+        RH 2021
+
+        Returns:
+            Bcp_detached (list of np.ndarray):
+                Detached Bcp tensors.
+        """
+        Bcp_detached = [Bcp.detach().cpu().numpy() for Bcp in self.Bcp]
+        return Bcp_detached
+
     def get_params(self):
         """
         Get the parameters of the model.
         RH 2021
         """
-        return {'X': self.X,
-                'y': self.y,
-                'weights': self.weights,
-                'Bcp': self.Bcp,
+        return {'X': self.X.detach().cpu().numpy(),
+                'y': self.y.detach().cpu().numpy(),
+                'weights': self.weights.detach().cpu().numpy(),
+                'Bcp': self.detach_Bcp(),
                 'non_negative': self.non_negative,
                 'softplus_kwargs': self.softplus_kwargs,
                 'rank': self.rank,
