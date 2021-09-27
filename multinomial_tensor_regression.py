@@ -636,6 +636,7 @@ class CP_logistic_regression():
                 'y': self.y.detach().cpu().numpy(),
                 'weights': self.weights.detach().cpu().numpy(),
                 'Bcp': self.detach_Bcp(),
+                'bias': self.bias.detach().cpu().numpy(),
                 'non_negative': self.non_negative,
                 'softplus_kwargs': self.softplus_kwargs,
                 'rank': self.rank,
@@ -655,6 +656,7 @@ class CP_logistic_regression():
         self.y = params['y']
         self.weights = params['weights']
         self.Bcp = params['Bcp']
+        self.bias = params['bias']
         self.non_negative = params['non_negative']
         self.softplus_kwargs = params['softplus_kwargs']
         self.rank = params['rank']
@@ -670,6 +672,7 @@ class CP_logistic_regression():
         print('y:', self.y.shape)
         print('weights:', self.weights)
         print('Bcp:', self.Bcp)
+        print('bias', self.bias)
         print('non_negative:', self.non_negative)
         print('softplus_kwargs:', self.softplus_kwargs)
         print('rank:', self.rank)
