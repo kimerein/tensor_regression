@@ -266,7 +266,6 @@ class CP_linear_regression():
         else:
             self.non_negative = non_negative        
 
-        print(bias_init)
         self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
 
         
