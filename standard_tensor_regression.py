@@ -462,6 +462,86 @@ class CP_linear_regression():
         return convergence_reached
 
 
+    def fit_Adam(self,
+            lambda_L2=0.01, 
+            max_iter=1000, 
+            tol=1e-5, 
+            patience=10,
+            verbose=False,
+            Adam_kwargs=None):
+        """
+        Fit a beta tensor (self.Bcp) to the data using the
+         Adam optimizer.
+        Note that self.Bcp is not the final Kruskal tensor, 
+         non_neg_fn(self.Bcp, non_negative) 
+         is the final Kruskal tensor.
+        Use self.return_Bcp_final() to get the final tensor.
+        Note that logging the loss (self.loss_running)
+         requires running the model extra times. If data is
+         large, then set running_loss_logging_interval to a
+         large number.
+        RH 2021
+
+        Args:
+            lambda_L2 (float):
+                L2 regularization parameter.
+            max_iter (int):
+                Maximum number of iterations.
+            tol (float):
+                Tolerance for the stopping criterion.
+            patience (int):
+                Number of iterations with no improvement to wait
+                 before early stopping.
+            verbose (0, 1, or 2):
+                If 0, then no output.
+                If 1, then only output whether the model has
+                 converged or not.
+            Adam_kwargs (dict):
+                Keyword arguments for Adam optimizer.
+        
+        Returns:
+            convergence_reached (bool):
+                True if convergence was reached.
+        """
+
+        if Adam_kwargs is None:
+            {
+                'lr' : 1, 
+                'betas' : (0.9, 0.999), 
+                'eps' : 1e-08, 
+                'weight_decay' : 0, 
+                'amsgrad' : False
+            }
+
+        tl.set_backend('pytorch')
+
+        optimizer = torch.optim.Adam(self.Bcp + [self.bias], **Adam_kwargs)
+        # optimizer = torch.optim.Adam(self.Bcp + [self.weights], **Adam_kwargs)
+        loss_fn = torch.nn.MSELoss()
+
+        convergence_reached = False
+        for ii in range(max_iter):
+            optimizer.zero_grad()
+            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+            loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
+            loss.backward()
+            optimizer.step()
+            self.loss_running.append(loss.item())
+            if verbose==2:
+                print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
+            if ii > patience:
+                if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
+                    convergence_reached = True
+                    break
+        if (verbose==True) or (verbose>=1):
+            if convergence_reached:
+                print('Convergence reached')
+            else:
+                print('Reached maximum number of iterations without convergence')
+        return convergence_reached
+
+
+
     def predict(self, X=None, y_true=None, Bcp=None, device=None, plot_pref=False):
         """
         Predict class labels for X given a Bcp (beta Kruskal tensor).
