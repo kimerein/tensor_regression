@@ -89,9 +89,14 @@ def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
             Beta Kruskal tensor.
     """
     # Bcp_init = [torch.nn.init.kaiming_uniform_(torch.empty(B_dims[ii], rank), a=0, mode='fan_in').to(device) for ii in range(len(B_dims))]
-    Bcp_init = [(torch.rand((B_dims[ii], rank))*scale - (1-non_negative[ii])*(scale/2)).to(device) for ii in range(len(B_dims))]
-    for ii in range(len(B_dims)):
-        Bcp_init[ii].requires_grad = True
+    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale).to(device) for ii in range(len(B_dims))]
+    # Bcp_init = [(torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale) + torch.nn.init.ones_(torch.empty(B_dims[ii], rank))).to(device) for ii in range(len(B_dims))]
+    # Bcp_init = [torch.nn.init.ones_(torch.empty(B_dims[ii], rank)).to(device) * scale for ii in range(len(B_dims))]
+    # Bcp_init = [torch.nn.init.sparse_(torch.empty(B_dims[ii], rank), sparsity=0.75, std=scale).to(device) for ii in range(len(B_dims))]
+    # Bcp_init = [(torch.rand((B_dims[ii], rank))*scale - (1-non_negative[ii])*(scale/2)).to(device) for ii in range(len(B_dims))]
+    # Bcp_init = [(torch.randn((B_dims[ii], rank))*0.0025).to(device) for ii in range(len(B_dims))]
+    # for ii in range(len(B_dims)):
+    #     Bcp_init[ii].requires_grad = True
     return Bcp_init
 
 def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
@@ -247,7 +252,8 @@ class CP_linear_regression():
         self.y = torch.tensor(y, dtype=torch.float32).to(device)
         
         if weights is None:
-            self.weights = torch.ones((rank), requires_grad=False, device=device)
+            # self.weights = torch.ones((rank), requires_grad=False, device=device)
+            self.weights = torch.ones((rank), requires_grad=True, device=device)
         else:
             self.weights = torch.tensor(weights)
 
@@ -273,6 +279,13 @@ class CP_linear_regression():
         B_dims = np.array(self.X.shape[1:])
         if Bcp_init is None:
             self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, scale=Bcp_init_scale, device=self.device)
+            # y_scale = torch.var(lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, self.softplus_kwargs).detach()) / torch.var(self.y)
+            # print(f'final y_init: {y_scale}')
+            for ii in range(len(B_dims)):
+                # self.Bcp[ii] = self.Bcp[ii] / y_scale
+                self.Bcp[ii].requires_grad = True
+            # y_scale_final = torch.var(lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, self.softplus_kwargs).detach()) / torch.var(self.y)
+            # print(f'final y_scale: {y_scale_final}')
         else:
             self.Bcp = Bcp_init
 
@@ -354,7 +367,8 @@ class CP_linear_regression():
                 y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
                 self.loss_running.append(loss_fn(y_hat, self.y).item())
                 if verbose==2:
-                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
+                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(self.y).item()}' )
+                    # print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
 
             if ii > patience:
                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
@@ -422,7 +436,8 @@ class CP_linear_regression():
 
         tl.set_backend('pytorch')
 
-        optimizer = torch.optim.Adam(self.Bcp, **Adam_kwargs)
+        optimizer = torch.optim.Adam(self.Bcp + [self.bias], **Adam_kwargs)
+        # optimizer = torch.optim.Adam(self.Bcp + [self.weights], **Adam_kwargs)
         loss_fn = torch.nn.MSELoss()
 
         convergence_reached = False
