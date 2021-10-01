@@ -202,7 +202,7 @@ def L2_penalty(B_cp):
 ####################################
 
 class CP_linear_regression():
-    def __init__(self, X, y, rank=5, non_negative=False, weights=None, Bcp_init=None, Bcp_init_scale=1, bias_init=0, device='cpu', softplus_kwargs=None):
+    def __init__(self, X_shape, n_classes, rank=5, non_negative=False, weights=None, Bcp_init=None, Bcp_init_scale=1, bias_init=0, device='cpu', softplus_kwargs=None):
         """
         Multinomial logistic CP tensor regression class.
         Bias is not considered in this model because there
@@ -248,8 +248,8 @@ class CP_linear_regression():
                 Device to run the model on.
         """        
 
-        self.X = torch.tensor(X, dtype=torch.float32).to(device)
-        self.y = torch.tensor(y, dtype=torch.float32).to(device)
+        # self.X = torch.tensor(X, dtype=torch.float32).to(device)
+        # self.y = torch.tensor(y, dtype=torch.float32).to(device)
         
         if weights is None:
             # self.weights = torch.ones((rank), requires_grad=False, device=device)
@@ -266,17 +266,17 @@ class CP_linear_regression():
         self.device = device
 
         if non_negative == True:
-            self.non_negative = [True]*(self.X.ndim)
+            self.non_negative = [True]*(len(X_shape))
         elif non_negative == False:
-            self.non_negative = [False]*(self.X.ndim)
+            self.non_negative = [False]*(len(X_shape))
         else:
             self.non_negative = non_negative        
 
         self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
 
         
-        self.n_classes = len(torch.unique(self.y))
-        B_dims = np.array(self.X.shape[1:])
+        self.n_classes = n_classes
+        B_dims = np.array(X_shape[1:])
         if Bcp_init is None:
             self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, scale=Bcp_init_scale, device=self.device)
             # y_scale = torch.var(lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, self.softplus_kwargs).detach()) / torch.var(self.y)
@@ -292,6 +292,8 @@ class CP_linear_regression():
         self.loss_running = []
 
     def fit(self,
+            X,
+            y,
             lambda_L2=0.01, 
             max_iter=1000, 
             tol=1e-5, 
@@ -354,8 +356,8 @@ class CP_linear_regression():
 
         def closure():
             optimizer.zero_grad()
-            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
+            y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+            loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             return loss
             
@@ -364,10 +366,10 @@ class CP_linear_regression():
         convergence_reached = False
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
-                y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-                self.loss_running.append(loss_fn(y_hat, self.y).item())
+                y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+                self.loss_running.append(loss_fn(y_hat, y).item())
                 if verbose==2:
-                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(self.y).item()}' )
+                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
                     # print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
 
             if ii > patience:
@@ -443,8 +445,8 @@ class CP_linear_regression():
         convergence_reached = False
         for ii in range(max_iter):
             optimizer.zero_grad()
-            y_hat = lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
+            y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+            loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             optimizer.step()
             self.loss_running.append(loss.item())
@@ -461,8 +463,65 @@ class CP_linear_regression():
                 print('Reached maximum number of iterations without convergence')
         return convergence_reached
 
+    def fit_batch_Adam(self,
+            dataloader,
+            lambda_L2=0.01, 
+            max_iter=1000, 
+            tol=1e-5, 
+            patience=10,
+            verbose=False,
+            Adam_kwargs=None,
+            device=None):
+        """
+        JZ 2021 / RH 2021
+        """
+            
+        if Adam_kwargs is None:
+            {
+                'lr' : 1, 
+                'betas' : (0.9, 0.999), 
+                'eps' : 1e-08, 
+                'weight_decay' : 0, 
+                'amsgrad' : False
+            }
 
-    def predict(self, X=None, y_true=None, Bcp=None, device=None, plot_pref=False):
+        tl.set_backend('pytorch')
+        
+        if device is None:
+            device = self.device
+
+        optimizer = torch.optim.Adam(self.Bcp + [self.bias], **Adam_kwargs)
+        loss_fn = torch.nn.MSELoss()
+        
+        convergence_reached = False
+        for ii in range(max_iter):
+            for batch_idx, data in enumerate(dataloader):
+                print(data)
+                X, y = data
+                X = torch.tensor(X, dtype=torch.float32).to(device)
+                y = torch.tensor(y, dtype=torch.float32).to(device)
+                optimizer.zero_grad()
+                y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+                loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+                loss.backward()
+                optimizer.step()
+                self.loss_running.append(loss.item())
+                if verbose==2:
+                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
+                if ii > patience:
+                    if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
+                        convergence_reached = True
+                        break
+        if (verbose==True) or (verbose>=1):
+            if convergence_reached:
+                print('Convergence reached')
+            else:
+                print('Reached maximum number of iterations without convergence')
+        return convergence_reached
+
+
+
+    def predict(self, X, y_true, Bcp=None, device=None, plot_pref=False):
         """
         Predict class labels for X given a Bcp (beta Kruskal tensor).
         Uses 'model' function in this module.
@@ -499,15 +558,15 @@ class CP_linear_regression():
         if device is None:
             device = self.device
         
-        if X is None:
-            X = self.X
-        elif isinstance(X, torch.Tensor) == False:
+        # if X is None:
+        #     X = self.X
+        if isinstance(X, torch.Tensor) == False:
             X = torch.tensor(X, dtype=torch.float32, requires_grad=False).to(device)
         elif X.device != device:
             X = X.to(device)
 
-        if y_true is None:
-            y_true = self.y.detach().cpu().numpy()
+        # if y_true is None:
+        #     y_true = self.y.detach().cpu().numpy()
 
                         
         if Bcp is None:
@@ -556,8 +615,9 @@ class CP_linear_regression():
         Get the parameters of the model.
         RH 2021
         """
-        return {'X': self.X.detach().cpu().numpy(),
-                'y': self.y.detach().cpu().numpy(),
+        return {
+                # 'X': self.X.detach().cpu().numpy(),
+                # 'y': self.y.detach().cpu().numpy(),
                 'weights': self.weights.detach().cpu().numpy(),
                 'Bcp': self.detach_Bcp(),
                 'non_negative': self.non_negative,
@@ -575,8 +635,8 @@ class CP_linear_regression():
             params (dict):
                 Dictionary of parameters.
         """
-        self.X = params['X']
-        self.y = params['y']
+        # self.X = params['X']
+        # self.y = params['y']
         self.weights = params['weights']
         self.Bcp = params['Bcp']
         self.non_negative = params['non_negative']
@@ -590,8 +650,8 @@ class CP_linear_regression():
         Display the parameters of the model.
         RH 2021
         """
-        print('X:', self.X.shape)
-        print('y:', self.y.shape)
+        # print('X:', self.X.shape)
+        # print('y:', self.y.shape)
         print('weights:', self.weights)
         print('Bcp:', self.Bcp)
         print('non_negative:', self.non_negative)
