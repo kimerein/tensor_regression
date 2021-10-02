@@ -13,73 +13,6 @@ import tensorly as tl
 ######## Useful functions ##########
 ####################################
 
-def set_device(use_GPU=True, verbose=True):
-    """
-    Set torch.cuda device to use.
-    RH 2021
-
-    Args:
-        use_GPU (int):
-            If 1, use GPU.
-            If 0, use CPU.
-    """
-    if use_GPU:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        if device != "cuda":
-            print("no GPU available. Using CPU.") if verbose else None
-        else:
-            print("GPU is enabled.") if verbose else None
-    else:
-        device = "cpu"
-        print("using CPU") if verbose else None
-
-    return device
-    
-def idx_to_oneHot(arr, n_classes=None):
-    """
-    Convert an array of class indices to matrix of
-     one-hot vectors.
-    RH 2021
-
-    Args:
-        arr (np.ndarray):
-            1-D array of class indices.
-        n_classes (int):
-            Number of classes.
-    
-    Returns:
-        oneHot (np.ndarray):
-            2-D array of one-hot vectors.
-    """
-    if n_classes is None:
-        n_classes = np.max(arr)+1
-    oneHot = np.zeros((arr.size, n_classes))
-    oneHot[np.arange(arr.size), arr] = 1
-    return oneHot
-
-def confusion_matrix(y_hat, y_true):
-    """
-    Compute the confusion matrix from y_hat and y_true.
-    y_hat should be either predictions ().
-    RH 2021
-
-    Args:
-        y_hat (np.ndarray): 
-            numpy array of predictions or probabilities. 
-            Either PREDICTIONS: 2-D array of booleans
-             ('one hots') or 1-D array of predicted 
-             class indices.
-            Or PROBABILITIES: 2-D array floats ('one hot
-             like')
-        y_true (np.ndarray):
-            1-D array of true class indices.
-    """
-    n_classes = np.max(y_true)+1
-    if y_hat.ndim == 1:
-        y_hat = idx_to_oneHot(y_hat, n_classes)
-    cmat = y_hat.T @ idx_to_oneHot(y_true, n_classes)
-    return cmat / np.sum(cmat, axis=0)[None,:]
-
 def squeeze_integers(arr):
     """
     Make integers in an array consecutive numbers
@@ -109,6 +42,52 @@ def squeeze_integers(arr):
 ####################################
 ######## Helper functions ##########
 ####################################
+    
+
+def confusion_matrix(y_hat, y_true):
+    """
+    Compute the confusion matrix from y_hat and y_true.
+    y_hat should be either predictions ().
+    RH 2021
+
+    Args:
+        y_hat (np.ndarray): 
+            numpy array of predictions or probabilities. 
+            Either PREDICTIONS: 2-D array of booleans
+             ('one hots') or 1-D array of predicted 
+             class indices.
+            Or PROBABILITIES: 2-D array floats ('one hot
+             like')
+        y_true (np.ndarray):
+            1-D array of true class indices.
+    """
+    n_classes = np.max(y_true)+1
+    if y_hat.ndim == 1:
+        y_hat = idx_to_oneHot(y_hat, n_classes)
+    cmat = y_hat.T @ idx_to_oneHot(y_true, n_classes)
+    return cmat / np.sum(cmat, axis=0)[None,:]
+    
+def idx_to_oneHot(arr, n_classes=None):
+    """
+    Convert an array of class indices to matrix of
+     one-hot vectors.
+    RH 2021
+
+    Args:
+        arr (np.ndarray):
+            1-D array of class indices.
+        n_classes (int):
+            Number of classes.
+    
+    Returns:
+        oneHot (np.ndarray):
+            2-D array of one-hot vectors.
+    """
+    if n_classes is None:
+        n_classes = np.max(arr)+1
+    oneHot = np.zeros((arr.size, n_classes))
+    oneHot[np.arange(arr.size), arr] = 1
+    return oneHot
 
 def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
     """
