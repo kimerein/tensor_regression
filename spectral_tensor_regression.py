@@ -14,7 +14,7 @@ import tensorly as tl
 ######## Helper functions ##########
 ####################################
 
-def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
+def make_BcpInit(B_dims, rank, non_negative, complex_dim, scale=1, device='cpu'):
     """
     Make initial Beta Kruskal tensor.
     RH 2021
@@ -38,7 +38,7 @@ def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
             Beta Kruskal tensor.
     """
     # Bcp_init = [torch.nn.init.kaiming_uniform_(torch.empty(B_dims[ii], rank), a=0, mode='fan_in').to(device) for ii in range(len(B_dims))]
-    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale).to(device) for ii in range(len(B_dims))]
+    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, complex_dim[ii]), gain=scale).to(device) for ii in range(len(B_dims))]
     # Bcp_init = [(torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale) + torch.nn.init.ones_(torch.empty(B_dims[ii], rank))).to(device) for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.ones_(torch.empty(B_dims[ii], rank)).to(device) * scale for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.sparse_(torch.empty(B_dims[ii], rank), sparsity=0.75, std=scale).to(device) for ii in range(len(B_dims))]
@@ -118,14 +118,65 @@ def lin_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
             N-D array of predictions.
     """
 
-    # return tl.tenalg.inner(X,
-    #                        tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
-    #                                                                             Bcp,
-    #                                                                             non_negative,
-    #                                                                             softplus_kwargs))
-    #                                                  ))[...,None],
-    #                        n_modes=len(Bcp)
-    #                     ).squeeze() + bias
+    return tl.tenalg.inner(X,
+                           tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
+                                                                                Bcp,
+                                                                                non_negative,
+                                                                                softplus_kwargs))
+                                                     ))[...,None],
+                           n_modes=len(Bcp)
+                        ).squeeze() + bias
+
+
+def spectral_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
+    """
+    Compute the regression model.
+    y_hat = inner(X, outer(softplus(Bcp))
+    where:
+        X.shape[1:] == Bcp.shape[:-1]
+        X.shape[0] == len(y_hat)
+        Bcp.shape[-1] == len(unique(y_true))
+        softplus is performed only on specified dimensions of Bcp.
+        inner prod is performed on dims [1:] of X and
+         dims [:-1] of Bcp.
+    RH 2021
+
+    Args:
+        X (torch.Tensor):
+            N-D array of data.
+        Bcp (list of torch.Tensor):
+            Beta Kruskal tensor (before softplus).
+            List of tensors of shape 
+             (n_features, rank).
+        weights (list of floats):
+            List of weights for each component.
+            len(weights) == rank == Bcp[0].shape[1]
+        non_negative (list of booleans):
+            List of booleans indicating whether each component
+             is non-negative.
+        bias (float):
+            Bias term. Scalar.
+        softplus_kwargs (dict):
+            Keyword arguments for torch.nn.functional.softplus.
+    
+    Returns:
+        y_hat (torch.Tensor):
+            N-D array of predictions.
+    """
+    
+    y_hat_all = []
+    for ii in range(Bcp[0].shape[2]):
+        y_hat_all += [tl.tenalg.inner(X,
+                           tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
+                                                                                [Bcp[0][:,:,ii], Bcp[1][:,:,0]],
+                                                                                non_negative,
+                                                                                softplus_kwargs))
+                                                     ))[...,None],
+                           n_modes=len(Bcp)
+                        ).squeeze()]
+                        
+    y_hat = torch.norm(torch.vstack(y_hat_all), dim=0) + bias
+    return y_hat
     
         
 def L2_penalty(B_cp):
@@ -143,6 +194,7 @@ def L2_penalty(B_cp):
     """
     ii=0
     for comp in B_cp:
+    # for comp in B_cp[1]:
         ii+= torch.sqrt(torch.sum(comp**2))
     return ii
 
@@ -152,7 +204,17 @@ def L2_penalty(B_cp):
 ####################################
 
 class CP_linear_regression():
-    def __init__(self, X_shape, rank=5, non_negative=False, weights=None, Bcp_init=None, Bcp_init_scale=1, bias_init=0, device='cpu', softplus_kwargs=None):
+    def __init__(self, 
+    X_shape, 
+    rank=5, 
+    non_negative=False, 
+    weights=None, 
+    Bcp_init=None, 
+    Bcp_init_scale=1, 
+    n_complex_dim=0, 
+    bias_init=0, 
+    device='cpu', 
+    softplus_kwargs=None):
         """
         Multinomial logistic CP tensor regression class.
         Bias is not considered in this model because there
@@ -228,8 +290,11 @@ class CP_linear_regression():
         self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
 
         B_dims = list(X_shape[1:])
+        complex_dims = list([n_complex_dim+1] + [1]*(len(B_dims)-1))
+        print(complex_dims)
+        # complex_dims = [1,1]
         if Bcp_init is None:
-            self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, scale=Bcp_init_scale, device=self.device)
+            self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, complex_dim=complex_dims, scale=Bcp_init_scale, device=self.device)
             # y_scale = torch.var(lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, self.softplus_kwargs).detach()) / torch.var(self.y)
             # print(f'final y_init: {y_scale}')
             for ii in range(len(B_dims)):
@@ -307,7 +372,8 @@ class CP_linear_regression():
 
         def closure():
             optimizer.zero_grad()
-            y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+            # y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+            y_hat = spectral_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
             loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
             loss.backward()
             return loss
@@ -317,8 +383,9 @@ class CP_linear_regression():
         convergence_reached = False
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
-                y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-                self.loss_running.append(loss_fn(y_hat, y).item())
+                # y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+                y_hat = spectral_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+                self.loss_running.append(loss_fn(y_hat, y).item() + lambda_L2 * L2_penalty(self.Bcp).item())
                 if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
                     # print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
@@ -616,7 +683,8 @@ class CP_linear_regression():
             for ii in range(len(Bcp)):
                 Bcp[ii] = Bcp[ii].to(device)
 
-        y_hat = lin_model(X, Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
+        # y_hat = lin_model(X, Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
+        y_hat = spectral_model(X, Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
             
         return y_hat
 
