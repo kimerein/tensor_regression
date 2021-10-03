@@ -227,7 +227,7 @@ class CP_linear_regression():
 
         self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
 
-        B_dims = np.array(X_shape[1:])
+        B_dims = list(X_shape[1:])
         if Bcp_init is None:
             self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, scale=Bcp_init_scale, device=self.device)
             # y_scale = torch.var(lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, self.softplus_kwargs).detach()) / torch.var(self.y)
@@ -402,7 +402,7 @@ class CP_linear_regression():
             optimizer.step()
             self.loss_running.append(loss.item())
             if verbose==2:
-                print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
+                print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
             if ii > patience:
                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
                     convergence_reached = True
@@ -420,6 +420,7 @@ class CP_linear_regression():
             max_iter=1000, 
             tol=1e-5, 
             patience=10,
+            n_iter_inner=10,
             verbose=False,
             Adam_kwargs=None,
             device=None):
@@ -452,15 +453,16 @@ class CP_linear_regression():
                 # X = torch.tensor(X, dtype=torch.float32).to(device)
                 # y = torch.tensor(y, dtype=torch.float32).to(device)
                 X = X.to(device)
-                y = y.to(device)                
-                optimizer.zero_grad()
-                y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-                loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
-                loss.backward()
-                optimizer.step()
-                self.loss_running.append(loss.item())
-                if verbose==2:
-                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
+                y = y.to(device)   
+                for iter_inner in range(n_iter_inner):             
+                    optimizer.zero_grad()
+                    y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+                    loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+                    loss.backward()
+                    optimizer.step()
+                    self.loss_running.append(loss.item())
+                    if verbose==2:
+                        print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
                 if ii > patience:
                     if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
                         convergence_reached = True
@@ -517,11 +519,19 @@ class CP_linear_regression():
         for ii in range(max_iter):
             for batch_idx, data in enumerate(dataloader):
                 # print(data)
-                X, y = data
+                gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
+                torch.cuda.empty_cache()
+                X, y = data[0].to(device), data[1].to(device)
                 # X = torch.tensor(X, dtype=torch.float32).to(device)
                 # y = torch.tensor(y, dtype=torch.float32).to(device)
-                X = X.to(device)
-                y = y.to(device) 
+                gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
+                torch.cuda.empty_cache()
+                # X = X.to(device)
+                # y = y.to(device) 
                 for iter_inner in range(n_iter_inner):               
                     y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
                     loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
