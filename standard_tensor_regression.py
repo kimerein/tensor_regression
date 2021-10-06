@@ -118,14 +118,14 @@ def lin_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
             N-D array of predictions.
     """
 
-    # return tl.tenalg.inner(X,
-    #                        tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
-    #                                                                             Bcp,
-    #                                                                             non_negative,
-    #                                                                             softplus_kwargs))
-    #                                                  ))[...,None],
-    #                        n_modes=len(Bcp)
-    #                     ).squeeze() + bias
+    return tl.tenalg.inner(X,
+                           tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
+                                                                                Bcp,
+                                                                                non_negative,
+                                                                                softplus_kwargs))
+                                                     ))[...,None],
+                           n_modes=len(Bcp)
+                        ).squeeze() + bias
     
         
 def L2_penalty(B_cp):

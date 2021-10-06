@@ -27,6 +27,9 @@ def make_BcpInit(B_dims, rank, non_negative, complex_dims=None, scale=1, device=
         non_negative (list of booleans):
             List of booleans indicating whether each component
              is non-negative.
+        complex_dims (list of ints):
+            List of the number of complex dimensions for each
+             component.
         scale (float):
             Scale of uniform distribution used to initialize
              each component.
@@ -39,8 +42,10 @@ def make_BcpInit(B_dims, rank, non_negative, complex_dims=None, scale=1, device=
     """
     if complex_dims is None:
         complex_dims = list([1]*len(B_dims))
+    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, complex_dims[ii]), gain=scale).to(device) for ii in range(len(B_dims))] # initialize orthogonal matrices
+    Bcp_init = [(Bcp_init[ii] + torch.std(Bcp_init[ii])*2*non_negative[ii])/((non_negative[ii]+1)) for ii in range(len(Bcp_init))] # make non-negative by adding 2 std to each non_neg component and dividing by 2
+
     # Bcp_init = [torch.nn.init.kaiming_uniform_(torch.empty(B_dims[ii], rank), a=0, mode='fan_in').to(device) for ii in range(len(B_dims))]
-    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, complex_dims[ii]), gain=scale).to(device) for ii in range(len(B_dims))]
     # Bcp_init = [(torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale) + torch.nn.init.ones_(torch.empty(B_dims[ii], rank))).to(device) for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.ones_(torch.empty(B_dims[ii], rank)).to(device) * scale for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.sparse_(torch.empty(B_dims[ii], rank), sparsity=0.75, std=scale).to(device) for ii in range(len(B_dims))]
@@ -48,8 +53,9 @@ def make_BcpInit(B_dims, rank, non_negative, complex_dims=None, scale=1, device=
     # Bcp_init = [(torch.randn((B_dims[ii], rank))*0.0025).to(device) for ii in range(len(B_dims))]
     # for ii in range(len(B_dims)):
     #     Bcp_init[ii].requires_grad = True
-    return Bcp_init
 
+    return Bcp_init
+    
 def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
     """
     Apply softplus to specified dimensions of Bcp.
@@ -101,7 +107,7 @@ def lin_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
         X (torch.Tensor):
             N-D array of data.
         Bcp (list of torch.Tensor):
-            Beta Kruskal tensor (before softplus).
+            Beta Kruskal tensor (before softplus). (Bcp_n)
             List of tensors of shape 
              (n_features, rank).
         weights (list of floats):
@@ -119,14 +125,17 @@ def lin_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
         y_hat (torch.Tensor):
             N-D array of predictions.
     """
+    
+    if Bcp[0].shape[1] == 0:
+        return torch.zeros(1).to(X.device)
 
     return tl.tenalg.inner(X,
                            tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
                                                                                 [Bcp[ii][:,:,0] for ii in range(len(Bcp))],
                                                                                 non_negative,
                                                                                 softplus_kwargs))
-                                                     ))[...,None],
-                           n_modes=len(Bcp)
+                                                     )),
+                           n_modes=len(X.shape[1:])
                         ).squeeze() + bias
 
 
@@ -147,7 +156,7 @@ def spectral_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
         X (torch.Tensor):
             N-D array of data.
         Bcp (list of torch.Tensor):
-            Complex Beta Kruskal tensor (before softplus).
+            Complex Beta Kruskal tensor (before softplus). (Bcp_c)
             List of tensors of shape 
              (n_features, rank, complex_dimensionality).
         weights (list of floats):
@@ -165,17 +174,21 @@ def spectral_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
         y_hat (torch.Tensor):
             N-D array of predictions.
     """
-    
+
+    if Bcp[0].shape[1] == 0:
+        return torch.zeros(1).to(X.device)
+
     y_hat_all = []
     for ii in range(Bcp[0].shape[2]):
         y_hat_all += [tl.tenalg.inner(X,
                            tl.cp_tensor.cp_to_tensor((weights, list(non_neg_fn(
                                                                                 [Bcp[0][:,:,ii]] + [ Bcp[jj][:,:,0] for jj in range(1,len(Bcp)) ],
+                                                                                # [Bcp[0][:,:,ii] - torch.mean(Bcp[0][:,:,ii])] + [ Bcp[jj][:,:,0] for jj in range(1,len(Bcp)) ],
                                                                                 non_negative,
                                                                                 softplus_kwargs))
-                                                     ))[...,None],
-                           n_modes=len(Bcp)
-                        ).squeeze()]
+                                                     )),
+                           n_modes=len(X.shape[1:])
+                        ).squeeze()[None,...]]
                         
     y_hat = torch.norm(torch.vstack(y_hat_all), dim=0) + bias
     return y_hat
@@ -208,6 +221,7 @@ def L2_penalty(B_cp):
 class CP_linear_regression():
     def __init__(self, 
     X_shape, 
+    y_shape,
     rank_normal=1, 
     rank_spectral=1,
     non_negative=False, 
@@ -292,9 +306,12 @@ class CP_linear_regression():
         else:
             self.non_negative = non_negative        
 
-        self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
+        # self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
+        self.bias = torch.zeros(y_shape[1:], dtype=torch.float32, requires_grad=True, device=device) 
+        self.y_shape = y_shape
 
-        B_dims = list(X_shape[1:])
+        # B_dims = list(X_shape[1:])
+        B_dims = list(X_shape[1:]) + list(y_shape[1:])
         complex_dims = list([n_complex_dim+1] + [1]*(len(B_dims)-1))
         if Bcp_init is None:
             self.Bcp_n = make_BcpInit(B_dims, self.rank_normal, self.non_negative, complex_dims=None, scale=Bcp_init_scale, device=self.device) # 'normal Beta_cp Kruskal tensor'
@@ -389,12 +406,11 @@ class CP_linear_regression():
         convergence_reached = False
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
-                y_hat = lin_model(X, self.Bcp_n, self.weights[:self.rank_normal], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs) + \
+                y_hat = lin_model(X, self.Bcp_n, self.weights[:self.rank_normal], self.non_negative, self.bias,softplus_kwargs=self.softplus_kwargs) + \
                         spectral_model(X, self.Bcp_c, self.weights[self.rank_normal:], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
                 self.loss_running.append((loss_fn(y_hat, y) + lambda_L2 * (L2_penalty(self.Bcp_n) + L2_penalty(self.Bcp_c))).item())
                 if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
-                    # print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}')
 
             if ii > patience:
                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
@@ -462,15 +478,16 @@ class CP_linear_regression():
 
         tl.set_backend('pytorch')
 
-        optimizer = torch.optim.Adam(self.Bcp + [self.bias], **Adam_kwargs)
+        optimizer = torch.optim.Adam(self.Bcp_n + self.Bcp_c + [self.bias], **Adam_kwargs)
         # optimizer = torch.optim.Adam(self.Bcp + [self.weights], **Adam_kwargs)
         loss_fn = torch.nn.MSELoss()
 
         convergence_reached = False
         for ii in range(max_iter):
             optimizer.zero_grad()
-            y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+            y_hat = lin_model(X, self.Bcp_n, self.weights[:self.rank_normal], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs) + \
+                        spectral_model(X, self.Bcp_c, self.weights[self.rank_normal:], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+            loss = loss_fn(y_hat, y) + lambda_L2 * (L2_penalty(self.Bcp_n) + L2_penalty(self.Bcp_c))
             loss.backward()
             optimizer.step()
             self.loss_running.append(loss.item())
@@ -487,149 +504,149 @@ class CP_linear_regression():
                 print('Reached maximum number of iterations without convergence')
         return convergence_reached
 
-    def fit_batch_Adam(self,
-            dataloader,
-            lambda_L2=0.01, 
-            max_iter=1000, 
-            tol=1e-5, 
-            patience=10,
-            n_iter_inner=10,
-            verbose=False,
-            Adam_kwargs=None,
-            device=None):
-        """
-        JZ 2021 / RH 2021
-        """
+    # def fit_batch_Adam(self,
+    #         dataloader,
+    #         lambda_L2=0.01, 
+    #         max_iter=1000, 
+    #         tol=1e-5, 
+    #         patience=10,
+    #         n_iter_inner=10,
+    #         verbose=False,
+    #         Adam_kwargs=None,
+    #         device=None):
+    #     """
+    #     JZ 2021 / RH 2021
+    #     """
             
-        if Adam_kwargs is None:
-            {
-                'lr' : 1, 
-                'betas' : (0.9, 0.999), 
-                'eps' : 1e-08, 
-                'weight_decay' : 0, 
-                'amsgrad' : False
-            }
+    #     if Adam_kwargs is None:
+    #         {
+    #             'lr' : 1, 
+    #             'betas' : (0.9, 0.999), 
+    #             'eps' : 1e-08, 
+    #             'weight_decay' : 0, 
+    #             'amsgrad' : False
+    #         }
 
-        tl.set_backend('pytorch')
+    #     tl.set_backend('pytorch')
         
-        if device is None:
-            device = self.device
+    #     if device is None:
+    #         device = self.device
 
-        optimizer = torch.optim.Adam(self.Bcp + [self.bias], **Adam_kwargs)
-        loss_fn = torch.nn.MSELoss()
+    #     optimizer = torch.optim.Adam(self.Bcp + [self.bias], **Adam_kwargs)
+    #     loss_fn = torch.nn.MSELoss()
         
-        convergence_reached = False
-        for ii in range(max_iter):
-            for batch_idx, data in enumerate(dataloader):
-                # print(data)
-                X, y = data
-                # X = torch.tensor(X, dtype=torch.float32).to(device)
-                # y = torch.tensor(y, dtype=torch.float32).to(device)
-                X = X.to(device)
-                y = y.to(device)   
-                for iter_inner in range(n_iter_inner):             
-                    optimizer.zero_grad()
-                    y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-                    loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
-                    loss.backward()
-                    optimizer.step()
-                    self.loss_running.append(loss.item())
-                    if verbose==2:
-                        print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
-                if ii > patience:
-                    if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
-                        convergence_reached = True
-                        break
-        if (verbose==True) or (verbose>=1):
-            if convergence_reached:
-                print('Convergence reached')
-            else:
-                print('Reached maximum number of iterations without convergence')
-        return convergence_reached
+    #     convergence_reached = False
+    #     for ii in range(max_iter):
+    #         for batch_idx, data in enumerate(dataloader):
+    #             # print(data)
+    #             X, y = data
+    #             # X = torch.tensor(X, dtype=torch.float32).to(device)
+    #             # y = torch.tensor(y, dtype=torch.float32).to(device)
+    #             X = X.to(device)
+    #             y = y.to(device)   
+    #             for iter_inner in range(n_iter_inner):             
+    #                 optimizer.zero_grad()
+    #                 y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+    #                 loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+    #                 loss.backward()
+    #                 optimizer.step()
+    #                 self.loss_running.append(loss.item())
+    #                 if verbose==2:
+    #                     print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
+    #             if ii > patience:
+    #                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
+    #                     convergence_reached = True
+    #                     break
+    #     if (verbose==True) or (verbose>=1):
+    #         if convergence_reached:
+    #             print('Convergence reached')
+    #         else:
+    #             print('Reached maximum number of iterations without convergence')
+    #     return convergence_reached
 
-    def fit_batch_LBFGS(self,
-            dataloader,
-            lambda_L2=0.01, 
-            max_iter=1000, 
-            tol=1e-5, 
-            patience=10,
-            n_iter_inner=10,
-            verbose=False,
-            LBFGS_kwargs=None,
-            device=None):
-        """
-        JZ 2021 / RH 2021
-        """
+    # def fit_batch_LBFGS(self,
+    #         dataloader,
+    #         lambda_L2=0.01, 
+    #         max_iter=1000, 
+    #         tol=1e-5, 
+    #         patience=10,
+    #         n_iter_inner=10,
+    #         verbose=False,
+    #         LBFGS_kwargs=None,
+    #         device=None):
+    #     """
+    #     JZ 2021 / RH 2021
+    #     """
 
-        if LBFGS_kwargs is None:
-            {
-                'lr' : 1, 
-                'max_iter' : 20, 
-                'max_eval' : 20, 
-                'tolerance_grad' : 1e-07, 
-                'tolerance_change' : 1e-09, 
-                'history_size' : 100, 
-                'line_search_fn' : "strong_wolfe"
-            }
+    #     if LBFGS_kwargs is None:
+    #         {
+    #             'lr' : 1, 
+    #             'max_iter' : 20, 
+    #             'max_eval' : 20, 
+    #             'tolerance_grad' : 1e-07, 
+    #             'tolerance_change' : 1e-09, 
+    #             'history_size' : 100, 
+    #             'line_search_fn' : "strong_wolfe"
+    #         }
 
-        tl.set_backend('pytorch')
+    #     tl.set_backend('pytorch')
         
-        if device is None:
-            device = self.device
+    #     if device is None:
+    #         device = self.device
 
-        tl.set_backend('pytorch')
+    #     tl.set_backend('pytorch')
 
-        optimizer = torch.optim.LBFGS(self.Bcp + [self.bias], **LBFGS_kwargs)
-        def closure():
-            optimizer.zero_grad()
-            y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
-            loss.backward()
-            return loss
-        loss_fn = torch.nn.MSELoss()
+    #     optimizer = torch.optim.LBFGS(self.Bcp + [self.bias], **LBFGS_kwargs)
+    #     def closure():
+    #         optimizer.zero_grad()
+    #         y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+    #         loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+    #         loss.backward()
+    #         return loss
+    #     loss_fn = torch.nn.MSELoss()
         
-        convergence_reached = False
-        for ii in range(max_iter):
-            for batch_idx, data in enumerate(dataloader):
-                # print(data)
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.empty_cache()
-                X, y = data[0].to(device), data[1].to(device)
-                # X = torch.tensor(X, dtype=torch.float32).to(device)
-                # y = torch.tensor(y, dtype=torch.float32).to(device)
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.empty_cache()
-                # X = X.to(device)
-                # y = y.to(device) 
-                for iter_inner in range(n_iter_inner):               
-                    y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-                    loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
-                    optimizer.step(closure)
+    #     convergence_reached = False
+    #     for ii in range(max_iter):
+    #         for batch_idx, data in enumerate(dataloader):
+    #             # print(data)
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             X, y = data[0].to(device), data[1].to(device)
+    #             # X = torch.tensor(X, dtype=torch.float32).to(device)
+    #             # y = torch.tensor(y, dtype=torch.float32).to(device)
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             # X = X.to(device)
+    #             # y = y.to(device) 
+    #             for iter_inner in range(n_iter_inner):               
+    #                 y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+    #                 loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+    #                 optimizer.step(closure)
 
-                    self.loss_running.append(loss.item())
-                    if verbose==2:
-                        print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
-                if ii > patience:
-                    if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
-                        convergence_reached = True
-                        break
+    #                 self.loss_running.append(loss.item())
+    #                 if verbose==2:
+    #                     print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
+    #             if ii > patience:
+    #                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
+    #                     convergence_reached = True
+    #                     break
                 
-                # del X, y, y_hat
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
+    #             # del X, y, y_hat
+    #             torch.cuda.empty_cache()
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             gc.collect()
 
-        if (verbose==True) or (verbose>=1):
-            if convergence_reached:
-                print('Convergence reached')
-            else:
-                print('Reached maximum number of iterations without convergence')
-        return convergence_reached
+    #     if (verbose==True) or (verbose>=1):
+    #         if convergence_reached:
+    #             print('Convergence reached')
+    #         else:
+    #             print('Reached maximum number of iterations without convergence')
+    #     return convergence_reached
 
 
     def predict(self, X, Bcp=None, device=None, plot_pref=False):
@@ -644,7 +661,11 @@ class CP_linear_regression():
                 If None, then use the data that was passed to the
                  constructor.
             Bcp (list of np.ndarray or torch.Tensor):
-                List of Bcp matrices.
+                List of Bcp lists of matrices.
+                Bcp[0] should be Bcp_n, Bcp[1] should be Bcp_c.
+                Note that Bcp_c[0] should be shape (X.shape[1],
+                 rank, complex_dimensionality), where 
+                 complex_dimensionality is usually 2 (real and complex).
                 If None, then use the Bcp that was passed to the
                  constructor.
             y_true (np.ndarray or torch.Tensor):
@@ -700,7 +721,8 @@ class CP_linear_regression():
 
         y_hat = lin_model(X, Bcp_n, self.weights[:self.rank_normal], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs) + \
                 spectral_model(X, Bcp_c, self.weights[self.rank_normal:], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-            
+        # y_hat = spectral_model(X, Bcp_c, self.weights[self.rank_normal:], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+
         return y_hat.cpu().detach().numpy()
 
     
@@ -715,9 +737,11 @@ class CP_linear_regression():
                 Final Kruskal tensor. Ready to multiply by the
                  data to predict class labels (y_hat).
         """
-        Bcp = list(non_neg_fn(self.Bcp, self.non_negative, softplus_kwargs=self.softplus_kwargs))
-        Bcp_nonNeg = [Bcp[ii].detach().cpu().numpy() for ii in range(len(Bcp))]
-        return Bcp_nonNeg
+        Bcp_n = list(non_neg_fn(self.Bcp_n, self.non_negative, softplus_kwargs=self.softplus_kwargs))
+        Bcp_c = list(non_neg_fn(self.Bcp_c, self.non_negative, softplus_kwargs=self.softplus_kwargs))
+        Bcp_n_nonNeg = [Bcp_n[ii].detach().cpu().numpy() for ii in range(len(Bcp_n))]
+        Bcp_c_nonNeg = [Bcp_c[ii].detach().cpu().numpy() for ii in range(len(Bcp_c))]
+        return Bcp_n_nonNeg , Bcp_c_nonNeg
     
     def detach_Bcp(self):
         """
@@ -792,9 +816,23 @@ class CP_linear_regression():
         plt.ylabel('loss')
         plt.title('loss')
 
-        Bcp_final = self.return_Bcp_final()
-        fig, axs = plt.subplots(len(Bcp_final))
-        for ii, val in enumerate(Bcp_final):
-            axs[ii].set_title(f'factor {ii}')
-            axs[ii].plot(val)
-        fig.suptitle('components')
+        Bcp_n_final, Bcp_c_final = self.return_Bcp_final()
+       
+        if self.rank_normal > 0:
+            fig_n, axs = plt.subplots(len(Bcp_n_final))
+            for ii, val in enumerate(Bcp_n_final):
+                axs[ii].set_title(f'factor {ii+1}')
+                axs[ii].plot(val.squeeze())
+            fig_n.suptitle('Bcp_n components')
+
+        if self.rank_spectral > 0:
+            fig_c, axs = plt.subplots(len(Bcp_c_final[1:]) + Bcp_c_final[0].shape[1])
+            jj = 0
+            for ii, val in enumerate(Bcp_c_final):
+                axs[ii+jj].set_title(f'factor {ii+1}')
+                if ii==0:
+                    for jj in range(val.shape[1]):
+                        axs[jj].plot(val[:,jj,:].squeeze())
+                else:
+                    axs[ii+jj].plot(val.squeeze())
+            fig_c.suptitle('Bcp_c components')
