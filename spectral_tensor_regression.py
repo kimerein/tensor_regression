@@ -14,7 +14,7 @@ import tensorly as tl
 ######## Helper functions ##########
 ####################################
 
-def make_BcpInit(B_dims, rank, non_negative, complex_dims=None, scale=1, device='cpu'):
+def make_BcpInit(B_dims, rank, non_negative, complex_dims=None, scale=1, device='cpu', dtype=torch.float32):
     """
     Make initial Beta Kruskal tensor.
     RH 2021
@@ -42,7 +42,7 @@ def make_BcpInit(B_dims, rank, non_negative, complex_dims=None, scale=1, device=
     """
     if complex_dims is None:
         complex_dims = list([1]*len(B_dims))
-    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, complex_dims[ii]), gain=scale).to(device) for ii in range(len(B_dims))] # initialize orthogonal matrices
+    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, complex_dims[ii], dtype=dtype), gain=scale).to(device) for ii in range(len(B_dims))] # initialize orthogonal matrices
     Bcp_init = [(Bcp_init[ii] + torch.std(Bcp_init[ii])*2*non_negative[ii])/((non_negative[ii]+1)) for ii in range(len(Bcp_init))] # make non-negative by adding 2 std to each non_neg component and dividing by 2
 
     # Bcp_init = [torch.nn.init.kaiming_uniform_(torch.empty(B_dims[ii], rank), a=0, mode='fan_in').to(device) for ii in range(len(B_dims))]
@@ -220,18 +220,19 @@ def L2_penalty(B_cp):
 
 class CP_linear_regression():
     def __init__(self, 
-    X_shape, 
-    y_shape,
-    rank_normal=1, 
-    rank_spectral=1,
-    non_negative=False, 
-    weights=None, 
-    Bcp_init=None, 
-    Bcp_init_scale=1, 
-    n_complex_dim=0, 
-    bias_init=0, 
-    device='cpu', 
-    softplus_kwargs=None):
+                    X_shape, 
+                    y_shape,
+                    dtype=torch.float32,
+                    rank_normal=1, 
+                    rank_spectral=1,
+                    non_negative=False, 
+                    weights=None, 
+                    Bcp_init=None, 
+                    Bcp_init_scale=1, 
+                    n_complex_dim=0, 
+                    bias_init=0, 
+                    device='cpu', 
+                    softplus_kwargs=None):
         """
         Multinomial logistic CP tensor regression class.
         Bias is not considered in this model because there
@@ -282,12 +283,14 @@ class CP_linear_regression():
 
         # self.X = torch.tensor(X, dtype=torch.float32).to(device)
         # self.y = torch.tensor(y, dtype=torch.float32).to(device)
+    
+        self.dtype = dtype
         
         if weights is None:
-            self.weights = torch.ones((rank_normal+rank_spectral), requires_grad=False, device=device)
+            self.weights = torch.ones((rank_normal+rank_spectral), dtype=self.dtype, requires_grad=False, device=device)
             # self.weights = torch.ones((rank), requires_grad=True, device=device)
         else:
-            self.weights = torch.tensor(weights)
+            self.weights = torch.tensor(weights, dtype=self.dtype, requires_grad=False, device=device)
 
         if softplus_kwargs is None:
             self.softplus_kwargs = {'beta': 50, 'threshold': 1}
@@ -307,15 +310,15 @@ class CP_linear_regression():
             self.non_negative = non_negative        
 
         # self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
-        self.bias = torch.zeros(y_shape[1:], dtype=torch.float32, requires_grad=True, device=device) 
+        self.bias = torch.zeros(y_shape[1:], dtype=self.dtype, requires_grad=True, device=device) 
         self.y_shape = y_shape
 
         # B_dims = list(X_shape[1:])
         B_dims = list(X_shape[1:]) + list(y_shape[1:])
         complex_dims = list([n_complex_dim+1] + [1]*(len(B_dims)-1))
         if Bcp_init is None:
-            self.Bcp_n = make_BcpInit(B_dims, self.rank_normal, self.non_negative, complex_dims=None, scale=Bcp_init_scale, device=self.device) # 'normal Beta_cp Kruskal tensor'
-            self.Bcp_c = make_BcpInit(B_dims, self.rank_spectral, self.non_negative, complex_dims=complex_dims, scale=Bcp_init_scale, device=self.device) # 'complex Beta_cp Kruskal tensor'
+            self.Bcp_n = make_BcpInit(B_dims, self.rank_normal, self.non_negative, complex_dims=None, scale=Bcp_init_scale, device=self.device, dtype=self.dtype) # 'normal Beta_cp Kruskal tensor'
+            self.Bcp_c = make_BcpInit(B_dims, self.rank_spectral, self.non_negative, complex_dims=complex_dims, scale=Bcp_init_scale, device=self.device, dtype=self.dtype) # 'complex Beta_cp Kruskal tensor'
             # y_scale = torch.var(lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, self.softplus_kwargs).detach()) / torch.var(self.y)
             # print(f'final y_init: {y_scale}')
             for ii in range(len(B_dims)):

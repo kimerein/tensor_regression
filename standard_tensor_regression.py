@@ -4,6 +4,7 @@ import gc
 import matplotlib.pyplot as plt
 
 import torch
+from torch._C import dtype
 import torch.cuda
 from torch.autograd import Variable
 from torch.optim import LBFGS
@@ -14,7 +15,7 @@ import tensorly as tl
 ######## Helper functions ##########
 ####################################
 
-def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
+def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu', dtype=torch.float32):
     """
     Make initial Beta Kruskal tensor.
     RH 2021
@@ -38,7 +39,7 @@ def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
             Beta Kruskal tensor.
     """
     # Bcp_init = [torch.nn.init.kaiming_uniform_(torch.empty(B_dims[ii], rank), a=0, mode='fan_in').to(device) for ii in range(len(B_dims))]
-    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale).to(device) for ii in range(len(B_dims))]
+    Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, dtype=dtype), gain=scale).to(device) for ii in range(len(B_dims))]
     # Bcp_init = [(torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale) + torch.nn.init.ones_(torch.empty(B_dims[ii], rank))).to(device) for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.ones_(torch.empty(B_dims[ii], rank)).to(device) * scale for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.sparse_(torch.empty(B_dims[ii], rank), sparsity=0.75, std=scale).to(device) for ii in range(len(B_dims))]
@@ -152,7 +153,17 @@ def L2_penalty(B_cp):
 ####################################
 
 class CP_linear_regression():
-    def __init__(self, X_shape, rank=5, non_negative=False, weights=None, Bcp_init=None, Bcp_init_scale=1, bias_init=0, device='cpu', softplus_kwargs=None):
+    def __init__(self,
+                    X_shape,
+                    dtype=torch.float32,
+                    rank=5,
+                    non_negative=False,
+                    weights=None,
+                    Bcp_init=None,
+                    Bcp_init_scale=1,
+                    bias_init=0,
+                    device='cpu',
+                    softplus_kwargs=None):
         """
         Multinomial logistic CP tensor regression class.
         Bias is not considered in this model because there
@@ -199,16 +210,17 @@ class CP_linear_regression():
                 Optional. Initial bias. Scalar.
             device (str):
                 Device to run the model on.
-        """        
+        """    
 
         # self.X = torch.tensor(X, dtype=torch.float32).to(device)
         # self.y = torch.tensor(y, dtype=torch.float32).to(device)
-        
+        self.dtype = dtype
+
         if weights is None:
-            self.weights = torch.ones((rank), requires_grad=False, device=device)
-            # self.weights = torch.ones((rank), requires_grad=True, device=device)
+            self.weights = torch.ones((rank), dtype=self.dtype, requires_grad=False, device=device)
+            # self.weights = torch.ones((rank), dtype=self.dtype, requires_grad=True, device=device)
         else:
-            self.weights = torch.tensor(weights)
+            self.weights = torch.tensor(weights, dtype=self.dtype, requires_grad=False, device=device)
 
         if softplus_kwargs is None:
             self.softplus_kwargs = {'beta': 50, 'threshold': 1}
@@ -225,11 +237,11 @@ class CP_linear_regression():
         else:
             self.non_negative = non_negative        
 
-        self.bias = torch.tensor([bias_init], dtype=torch.float32, requires_grad=True, device=device) 
+        self.bias = torch.tensor([bias_init], dtype=self.dtype, requires_grad=True, device=device) 
 
         B_dims = list(X_shape[1:])
         if Bcp_init is None:
-            self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, scale=Bcp_init_scale, device=self.device)
+            self.Bcp = make_BcpInit(B_dims, self.rank, self.non_negative, scale=Bcp_init_scale, device=self.device, dtype=self.dtype)
             # y_scale = torch.var(lin_model(self.X, self.Bcp, self.weights, self.non_negative, self.bias, self.softplus_kwargs).detach()) / torch.var(self.y)
             # print(f'final y_init: {y_scale}')
             for ii in range(len(B_dims)):
