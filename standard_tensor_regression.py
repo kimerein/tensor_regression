@@ -414,149 +414,149 @@ class CP_linear_regression():
                 print('Reached maximum number of iterations without convergence')
         return convergence_reached
 
-    def fit_batch_Adam(self,
-            dataloader,
-            lambda_L2=0.01, 
-            max_iter=1000, 
-            tol=1e-5, 
-            patience=10,
-            n_iter_inner=10,
-            verbose=False,
-            Adam_kwargs=None,
-            device=None):
-        """
-        JZ 2021 / RH 2021
-        """
+    # def fit_batch_Adam(self,
+    #         dataloader,
+    #         lambda_L2=0.01, 
+    #         max_iter=1000, 
+    #         tol=1e-5, 
+    #         patience=10,
+    #         n_iter_inner=10,
+    #         verbose=False,
+    #         Adam_kwargs=None,
+    #         device=None):
+    #     """
+    #     JZ 2021 / RH 2021
+    #     """
             
-        if Adam_kwargs is None:
-            {
-                'lr' : 1, 
-                'betas' : (0.9, 0.999), 
-                'eps' : 1e-08, 
-                'weight_decay' : 0, 
-                'amsgrad' : False
-            }
+    #     if Adam_kwargs is None:
+    #         {
+    #             'lr' : 1, 
+    #             'betas' : (0.9, 0.999), 
+    #             'eps' : 1e-08, 
+    #             'weight_decay' : 0, 
+    #             'amsgrad' : False
+    #         }
 
-        tl.set_backend('pytorch')
+    #     tl.set_backend('pytorch')
         
-        if device is None:
-            device = self.device
+    #     if device is None:
+    #         device = self.device
 
-        optimizer = torch.optim.Adam(self.Bcp + [self.bias], **Adam_kwargs)
-        loss_fn = torch.nn.MSELoss()
+    #     optimizer = torch.optim.Adam(self.Bcp + [self.bias], **Adam_kwargs)
+    #     loss_fn = torch.nn.MSELoss()
         
-        convergence_reached = False
-        for ii in range(max_iter):
-            for batch_idx, data in enumerate(dataloader):
-                # print(data)
-                X, y = data
-                # X = torch.tensor(X, dtype=torch.float32).to(device)
-                # y = torch.tensor(y, dtype=torch.float32).to(device)
-                X = X.to(device)
-                y = y.to(device)   
-                for iter_inner in range(n_iter_inner):             
-                    optimizer.zero_grad()
-                    y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-                    loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
-                    loss.backward()
-                    optimizer.step()
-                    self.loss_running.append(loss.item())
-                    if verbose==2:
-                        print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
-                if ii > patience:
-                    if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
-                        convergence_reached = True
-                        break
-        if (verbose==True) or (verbose>=1):
-            if convergence_reached:
-                print('Convergence reached')
-            else:
-                print('Reached maximum number of iterations without convergence')
-        return convergence_reached
+    #     convergence_reached = False
+    #     for ii in range(max_iter):
+    #         for batch_idx, data in enumerate(dataloader):
+    #             # print(data)
+    #             X, y = data
+    #             # X = torch.tensor(X, dtype=torch.float32).to(device)
+    #             # y = torch.tensor(y, dtype=torch.float32).to(device)
+    #             X = X.to(device)
+    #             y = y.to(device)   
+    #             for iter_inner in range(n_iter_inner):             
+    #                 optimizer.zero_grad()
+    #                 y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+    #                 loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+    #                 loss.backward()
+    #                 optimizer.step()
+    #                 self.loss_running.append(loss.item())
+    #                 if verbose==2:
+    #                     print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
+    #             if ii > patience:
+    #                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
+    #                     convergence_reached = True
+    #                     break
+    #     if (verbose==True) or (verbose>=1):
+    #         if convergence_reached:
+    #             print('Convergence reached')
+    #         else:
+    #             print('Reached maximum number of iterations without convergence')
+    #     return convergence_reached
 
-    def fit_batch_LBFGS(self,
-            dataloader,
-            lambda_L2=0.01, 
-            max_iter=1000, 
-            tol=1e-5, 
-            patience=10,
-            n_iter_inner=10,
-            verbose=False,
-            LBFGS_kwargs=None,
-            device=None):
-        """
-        JZ 2021 / RH 2021
-        """
+    # def fit_batch_LBFGS(self,
+    #         dataloader,
+    #         lambda_L2=0.01, 
+    #         max_iter=1000, 
+    #         tol=1e-5, 
+    #         patience=10,
+    #         n_iter_inner=10,
+    #         verbose=False,
+    #         LBFGS_kwargs=None,
+    #         device=None):
+    #     """
+    #     JZ 2021 / RH 2021
+    #     """
 
-        if LBFGS_kwargs is None:
-            {
-                'lr' : 1, 
-                'max_iter' : 20, 
-                'max_eval' : 20, 
-                'tolerance_grad' : 1e-07, 
-                'tolerance_change' : 1e-09, 
-                'history_size' : 100, 
-                'line_search_fn' : "strong_wolfe"
-            }
+    #     if LBFGS_kwargs is None:
+    #         {
+    #             'lr' : 1, 
+    #             'max_iter' : 20, 
+    #             'max_eval' : 20, 
+    #             'tolerance_grad' : 1e-07, 
+    #             'tolerance_change' : 1e-09, 
+    #             'history_size' : 100, 
+    #             'line_search_fn' : "strong_wolfe"
+    #         }
 
-        tl.set_backend('pytorch')
+    #     tl.set_backend('pytorch')
         
-        if device is None:
-            device = self.device
+    #     if device is None:
+    #         device = self.device
 
-        tl.set_backend('pytorch')
+    #     tl.set_backend('pytorch')
 
-        optimizer = torch.optim.LBFGS(self.Bcp + [self.bias], **LBFGS_kwargs)
-        def closure():
-            optimizer.zero_grad()
-            y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-            loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
-            loss.backward()
-            return loss
-        loss_fn = torch.nn.MSELoss()
+    #     optimizer = torch.optim.LBFGS(self.Bcp + [self.bias], **LBFGS_kwargs)
+    #     def closure():
+    #         optimizer.zero_grad()
+    #         y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+    #         loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+    #         loss.backward()
+    #         return loss
+    #     loss_fn = torch.nn.MSELoss()
         
-        convergence_reached = False
-        for ii in range(max_iter):
-            for batch_idx, data in enumerate(dataloader):
-                # print(data)
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.empty_cache()
-                X, y = data[0].to(device), data[1].to(device)
-                # X = torch.tensor(X, dtype=torch.float32).to(device)
-                # y = torch.tensor(y, dtype=torch.float32).to(device)
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.empty_cache()
-                # X = X.to(device)
-                # y = y.to(device) 
-                for iter_inner in range(n_iter_inner):               
-                    y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
-                    loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
-                    optimizer.step(closure)
+    #     convergence_reached = False
+    #     for ii in range(max_iter):
+    #         for batch_idx, data in enumerate(dataloader):
+    #             # print(data)
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             X, y = data[0].to(device), data[1].to(device)
+    #             # X = torch.tensor(X, dtype=torch.float32).to(device)
+    #             # y = torch.tensor(y, dtype=torch.float32).to(device)
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             # X = X.to(device)
+    #             # y = y.to(device) 
+    #             for iter_inner in range(n_iter_inner):               
+    #                 y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+    #                 loss = loss_fn(y_hat, y) + lambda_L2 * L2_penalty(self.Bcp)
+    #                 optimizer.step(closure)
 
-                    self.loss_running.append(loss.item())
-                    if verbose==2:
-                        print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
-                if ii > patience:
-                    if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
-                        convergence_reached = True
-                        break
+    #                 self.loss_running.append(loss.item())
+    #                 if verbose==2:
+    #                     print(f'Epoch: {ii}, Inner iteration: {iter_inner}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
+    #             if ii > patience:
+    #                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
+    #                     convergence_reached = True
+    #                     break
                 
-                # del X, y, y_hat
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
+    #             # del X, y, y_hat
+    #             torch.cuda.empty_cache()
+    #             gc.collect()
+    #             torch.cuda.empty_cache()
+    #             gc.collect()
 
-        if (verbose==True) or (verbose>=1):
-            if convergence_reached:
-                print('Convergence reached')
-            else:
-                print('Reached maximum number of iterations without convergence')
-        return convergence_reached
+    #     if (verbose==True) or (verbose>=1):
+    #         if convergence_reached:
+    #             print('Convergence reached')
+    #         else:
+    #             print('Reached maximum number of iterations without convergence')
+    #     return convergence_reached
 
 
     def predict(self, X, Bcp=None, device=None, plot_pref=False):
