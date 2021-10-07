@@ -40,6 +40,7 @@ def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu', dtype=torch.
     """
     # Bcp_init = [torch.nn.init.kaiming_uniform_(torch.empty(B_dims[ii], rank), a=0, mode='fan_in').to(device) for ii in range(len(B_dims))]
     Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, dtype=dtype), gain=scale).to(device) for ii in range(len(B_dims))]
+    Bcp_init = [(Bcp_init[ii] + torch.std(Bcp_init[ii])*2*non_negative[ii])/((non_negative[ii]+1)) if Bcp_init[0].shape[0]>1 else Bcp_init[ii] for ii in range(len(Bcp_init))] # make non-negative by adding 2 std to each non_neg component and dividing by 2. Only if an std can be calculated (if n samples > 1)
     # Bcp_init = [(torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale) + torch.nn.init.ones_(torch.empty(B_dims[ii], rank))).to(device) for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.ones_(torch.empty(B_dims[ii], rank)).to(device) * scale for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.sparse_(torch.empty(B_dims[ii], rank), sparsity=0.75, std=scale).to(device) for ii in range(len(B_dims))]
