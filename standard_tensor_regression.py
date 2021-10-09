@@ -130,6 +130,53 @@ def lin_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
                         ).squeeze() + bias
     
         
+def stepwise_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
+    """
+    Computes regression model in a stepwise manner.
+    y_hat = inner(X, outer(softplus(Bcp))
+    where:
+        X.shape[1:] == Bcp.shape[:-1]
+        X.shape[0] == len(y_hat)
+        Bcp.shape[-1] == len(unique(y_true))
+        softplus is performed only on specified dimensions of Bcp.
+        inner prod is performed on dims [1:] of X and
+         dims [:-1] of Bcp.
+    RH 2021
+
+    Args:
+        X (torch.Tensor):
+            N-D array of data.
+        Bcp (list of torch.Tensor):
+            Beta Kruskal tensor (before softplus). (Bcp_n)
+            List of tensors of shape 
+             (n_features, rank).
+        weights (list of floats):
+            List of weights for each component.
+            len(weights) == rank == Bcp[0].shape[1]
+        non_negative (list of booleans):
+            List of booleans indicating whether each component
+             is non-negative.
+        bias (float):
+            Bias term. Scalar.
+        softplus_kwargs (dict):
+            Keyword arguments for torch.nn.functional.softplus.
+    
+    Returns:
+        y_hat (torch.Tensor):
+            N-D array of predictions.
+    """
+
+    if Bcp[0].shape[1] == 0:
+        return torch.zeros(1).to(X.device)
+
+    # make non-negative
+    Bcp_nn = list(non_neg_fn(Bcp, non_negative, softplus_kwargs))
+    X_1 = torch.einsum('twd,wr -> tdr', X, Bcp_nn[0])
+    X_2 = torch.einsum('tdr,dr -> tr', X_1, Bcp_nn[1])
+    X_3 = torch.einsum('tr -> t', X_2)
+    return X_3 + bias
+
+
 def L2_penalty(B_cp):
     """
     Compute the L2 penalty.
@@ -331,6 +378,7 @@ class CP_linear_regression():
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
                 y_hat = lin_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
+                # y_hat = stepwise_model(X, self.Bcp, self.weights, self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
                 self.loss_running.append(loss_fn(y_hat, y).item())
                 if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
@@ -570,6 +618,11 @@ class CP_linear_regression():
     #         else:
     #             print('Reached maximum number of iterations without convergence')
     #     return convergence_reached
+
+
+    ####################################
+    ############ POST-HOC ##############
+    ####################################
 
 
     def predict(self, X, Bcp=None, device=None, plot_pref=False):
