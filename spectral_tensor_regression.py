@@ -42,8 +42,12 @@ def make_BcpInit(B_dims, rank, non_negative, complex_dims=None, scale=1, device=
     """
     if complex_dims is None:
         complex_dims = list([1]*len(B_dims))
+    # Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, complex_dims[ii], dtype=dtype), gain=scale).to(device) for ii in range(len(B_dims))] # initialize orthogonal matrices
     Bcp_init = [torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank, complex_dims[ii], dtype=dtype), gain=scale).to(device) for ii in range(len(B_dims))] # initialize orthogonal matrices
     Bcp_init = [(Bcp_init[ii] + torch.std(Bcp_init[ii])*2*non_negative[ii])/((non_negative[ii]+1)) if Bcp_init[0].shape[0]>1 else Bcp_init[ii] for ii in range(len(Bcp_init))] # make non-negative by adding 2 std to each non_neg component and dividing by 2. Only if an std can be calculated (if n samples > 1)
+    
+    # Bcp_init = [torch.nn.init.orthogonal_(     torch.empty(B_dims[ii], rank, complex_dims[ii], dtype=dtype), gain=scale).to(device) for ii in range(len(B_dims))] # initialize orthogonal matrices
+    # Bcp_init = [(torch.nn.init.ones_(torch.empty(B_dims[ii], rank, complex_dims[ii], dtype=dtype)) * scale).to(device) for ii in range(len(B_dims))] # initialize orthogonal matrices
     # Bcp_init = [torch.nn.init.kaiming_uniform_(torch.empty(B_dims[ii], rank), a=0, mode='fan_in').to(device) for ii in range(len(B_dims))]
     # Bcp_init = [(torch.nn.init.orthogonal_(torch.empty(B_dims[ii], rank), gain=scale) + torch.nn.init.ones_(torch.empty(B_dims[ii], rank))).to(device) for ii in range(len(B_dims))]
     # Bcp_init = [torch.nn.init.ones_(torch.empty(B_dims[ii], rank)).to(device) * scale for ii in range(len(B_dims))]
@@ -468,6 +472,8 @@ class CP_linear_regression():
             
         loss_fn = torch.nn.MSELoss()
 
+        if verbose==3:
+            self.fig, self.axs = plt.subplots(1 + len(self.Bcp_n) + len(self.Bcp_c), figsize=(7,20))
 
         convergence_reached = False
         for ii in range(max_iter):
@@ -478,11 +484,18 @@ class CP_linear_regression():
                 self.loss_running.append((loss_fn(y_hat, y) + lambda_L2 * (L2_penalty(self.Bcp_n) + L2_penalty(self.Bcp_c))).item())
                 if verbose==2:
                     print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
-
+                elif verbose==3:
+                    self.update_plot_outputs(self.fig, self.axs)
+                    # plt.pause(0.01)
+                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
             if ii > patience:
                 if np.sum(np.abs(np.diff(self.loss_running[-patience+1:]))) < tol:
                     convergence_reached = True
                     break
+            elif np.isnan(self.loss_running[-1]):
+                convergence_reached = False
+                print('Loss is NaN. Stopping.')
+                break
 
             optimizer.step(closure)
         if (verbose==True) or (verbose>=1):
@@ -492,12 +505,14 @@ class CP_linear_regression():
                 print('Reached maximum number of iterations without convergence')
         return convergence_reached
 
+
     def fit_Adam(self,X,y,
             lambda_L2=0.01, 
             max_iter=1000, 
             tol=1e-5, 
             patience=10,
             verbose=False,
+            plotting_interval=100,
             Adam_kwargs=None):
         """
         Fit a beta tensor (self.Bcp) to the data using the
@@ -549,6 +564,9 @@ class CP_linear_regression():
         # optimizer = torch.optim.Adam(self.Bcp + [self.weights], **Adam_kwargs)
         loss_fn = torch.nn.MSELoss()
 
+        if verbose==3:
+            self.fig, self.axs = plt.subplots(1 + len(self.Bcp_n) + len(self.Bcp_c), figsize=(7,20))
+
         convergence_reached = False
         for ii in range(max_iter):
             optimizer.zero_grad()
@@ -560,10 +578,19 @@ class CP_linear_regression():
             self.loss_running.append(loss.item())
             if verbose==2:
                 print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
+            elif verbose==3 and ii%plotting_interval == 0:
+                self.update_plot_outputs(self.fig, self.axs)
+                # plt.pause(0.01)
+                print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
             if ii > patience:
                 if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
                     convergence_reached = True
                     break
+            elif np.isnan(self.loss_running[-1]):
+                convergence_reached = False
+                print('Loss is NaN. Stopping.')
+                break
+
         if (verbose==True) or (verbose>=1):
             if convergence_reached:
                 print('Convergence reached')
@@ -908,3 +935,32 @@ class CP_linear_regression():
                 else:
                     axs[ii+jj].plot(val.squeeze())
             fig_c.suptitle('Bcp_c components')
+
+    def update_plot_outputs(self, fig, axs):
+        """
+        Update the outputs of the model.
+        RH 2021
+        """
+        axs[0].clear()
+        axs[0].plot(self.loss_running)
+        axs[0].set_title('loss')
+
+        Bcp_n_final, Bcp_c_final = self.return_Bcp_final()
+       
+        if self.rank_normal > 0:
+            for ii, val in enumerate(Bcp_n_final):
+                axs[ii+1].clear()
+                axs[ii+1].plot(val.squeeze())
+                axs[ii+1].set_title(f'factor {ii+1}')
+                axs[ii+1].set_ylim(bottom=-0.09, top=0.09)
+
+        if self.rank_spectral > 0:
+            for ii, val in enumerate(Bcp_c_final):
+                axs[ii+1+len(Bcp_n_final)].clear()
+                axs[ii+1+len(Bcp_n_final)].plot(val.squeeze())
+                axs[ii+1+len(Bcp_n_final)].set_title(f'factor {ii+1}')
+
+        fig.canvas.draw()
+        fig.canvas.flush_events()
+        plt.pause(0.0001)
+    
