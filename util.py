@@ -27,10 +27,10 @@ def set_device(use_GPU=True, verbose=True):
         if device != "cuda":
             print("no GPU available. Using CPU.") if verbose else None
         else:
-            print("GPU is enabled.") if verbose else None
+            print(f"device: '{device}'") if verbose else None
     else:
         device = "cpu"
-        print("using CPU") if verbose else None
+        print(f"device: '{device}'") if verbose else None
 
     return device
     
