@@ -154,6 +154,8 @@ def lin_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
     if Bcp[0].shape[1] == 0:
         return torch.zeros(1).to(X.device)
 
+    complex_dims = X.shape[-1]
+
     print(len(Bcp))
 
     # Bcp = edge_clamp(Bcp, edge_idx=torch.hstack([torch.arange(0,600), torch.arange(1320,1920)]), clamp_val=0, device=X.device, dtype=X.dtype)
@@ -163,7 +165,7 @@ def lin_model(X, Bcp, weights, non_negative, bias, softplus_kwargs=None):
                                                                                 non_negative,
                                                                                 softplus_kwargs))
                                                      )),
-                           n_modes=X.ndim-1
+                           n_modes=X.ndim-1+complex_dims
                         ).squeeze() + bias
 
 # def encode(X, Bcp_e, weights, non_negative, softplus_kwargs=None):
@@ -271,6 +273,9 @@ def conv(X, kernel, **conv1d_kwargs):
     X_rshp = X.reshape((t_dim, 1, -1)).permute(2,1,0)
     # kernel_rshp = kernel.reshape((-1, in_channels, kernel.shape[-1]))
     kernel_rshp = kernel.reshape((w_dim, 1, -1)).permute(2,1,0)
+
+    print(X_rshp.shape)
+    print(kernel_rshp.shape)
 
     convolved = torch.nn.functional.conv1d(X_rshp, kernel_rshp, **conv1d_kwargs)
     # convolved_rshp = convolved.reshape((X.shape[0], kernel.shape[0], kernel.shape[1], -1))
