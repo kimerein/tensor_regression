@@ -98,6 +98,37 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
         else:
             yield B_cp[ii]
 
+def gaussian(x, mu, sig , plot_pref=False):
+    '''
+    A gaussian function (normalized similarly to scipy's function)
+    RH 2021
+    
+    Args:
+        x (np.ndarray): 1-D array of the x-axis of the kernel
+        mu (float): center position on x-axis
+        sig (float): standard deviation (sigma) of gaussian
+        plot_pref (boolean): True/False or 1/0. Whether you'd like the kernel plotted
+        
+    Returns:
+        gaus (np.ndarray): gaussian function (normalized) of x
+        params_gaus (dict): dictionary containing the input params
+    '''
+
+    gaus = 1/(np.sqrt(2*np.pi)*sig)*np.exp(-np.power((x-mu)/sig, 2)/2)
+
+    if plot_pref:
+        plt.figure()
+        plt.plot(x , gaus)
+        plt.xlabel('x')
+        plt.title(f'$\mu$={mu}, $\sigma$={sig}')
+    
+    params_gaus = {
+        "x": x,
+        "mu": mu,
+        "sig": sig,
+    }
+
+    return gaus , params_gaus
 
 # def edge_clamp(B_cp, edge_idx, clamp_val=0, device='cpu', dtype=torch.float32):
 #     """
@@ -256,36 +287,49 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
 
 
 
-@torch.jit.script
-def conv(X, kernel):
+# @torch.jit.script
+def conv(X, kernels):
     """
-    X: (t_dim x dots_dim)
-    kernel: (w_dim x R_dim x complex_dim)
-    RH 2021 / JZ 2021
+    Convolution of X with kernels
+    RH 2021
 
-    Returns: (dots_dim x R_dim x complex_dim x (t_dim - w_dim)//stride + 1)
+    Args:
+        X (torch.Tensor):
+            N-D array. Convolution will be performed
+             along first dimension (columns).
+            Dims 1+ are convolved independently and 
+             increase the dimensionality of the output.
+        kernels (torch.Tensor):
+            N-D array. Convolution will be performed
+             along first dimension (columns).
+            Dims 1+ are convolved independently and 
+             increase the dimensionality of the output.
+        conv1d_kwargs (dict or keyword args):
+            Keyword arguments for 
+             torch.nn.functional.conv1d.
+            See torch.nn.functional.conv1d for details.
+            You can use padding='same'
+        
+    Returns:
+        output (torch.Tensor):
+            N-D array. Convolution of X with kernels
     """
     X_dims = list(X.shape)
     t_dim = X_dims[0]
 
-    kernel_dims = list(kernel.shape)
+    kernel_dims = list(kernels.shape)
     w_dim = [kernel_dims[0]]
-    wr_dim = [kernel_dims[1]]
-    if kernel.ndim == 3:
-        wc_dim = [kernel.shape[2]]
-    else:
-        wc_dim = [1]
-    
-    conv_out_shape = [-1] + X_dims[1:] + wr_dim + wc_dim # (T, D, R, C)
+
+    conv_out_shape = [-1] + X_dims[1:] + kernel_dims[1:] 
     
     X_rshp = X.reshape((t_dim, 1, -1)).permute(2,1,0) # flatten non-time dims and shape to (non-time dims, 1, time dims) (D X R, 1, t)
-    kernel_rshp = kernel.reshape(w_dim + [1, -1]).permute(2,1,0) # flatten rank + complex dims and shape to (rank X complex dims, 1, W) (R X C, 1, W)
+    kernel_rshp = kernels.reshape(w_dim + [1, -1]).permute(2,1,0) # flatten rank + complex dims and shape to (rank X complex dims, 1, W) (R X C, 1, W)
 
+    # print(X_rshp.dtype)
+    # print(kernel_rshp.dtype)
     convolved = torch.nn.functional.conv1d(X_rshp, kernel_rshp)  
-
-    convolved_T = convolved.permute(2, 0, 1) # (T, 1, R X C)
-
-    convolved_rshp = convolved_T.reshape((conv_out_shape)) # (T, D, R, C)
+   
+    convolved_rshp = convolved.permute(2, 0, 1).reshape((conv_out_shape)) # (T, D, R, C)
 
     return convolved_rshp
 
@@ -677,6 +721,94 @@ def conv_linear(X:torch.Tensor, kernel:list, Bcp:list, weights, non_negative, bi
 
     return pred
 
+def spectral_penalty(y_pred, y_true=None, y_true_fft=None, n_fft=None, smoothing_kernel=None, passthrough=False, lam=0, plot_pref=False):
+    """
+    Computes the MSE of the spectrums of y_pred and y_true..
+
+    Args:
+        y_pred (torch.Tensor):
+            N-D array of predictions.
+        y_true (torch.Tensor):
+            N-D array of ground truth.
+        y_true_fft (torch.Tensor):
+            N-D array of spectrums of ground truth.
+        smoothing_kernel (torch.Tensor):
+            1-D array of smoothing kernel.
+    
+    Returns:
+        loss (torch.Tensor):
+            Scalar loss.
+    RH 2021
+    """
+    if passthrough:
+        return 0
+
+    if y_true is not None:
+        y_true_fft = torch.abs(torch.fft.rfft(y_true, dim=0))
+
+    assert y_true_fft is not None, "y_true_fft is None"
+
+    # print(f'before {torch.norm(y_pred)}')
+    # print(f'before {torch.sum(torch.isnan(y_pred))}')
+    # print(f'before {torch.sum(torch.isinf(y_pred))}')
+    # print(f'before {torch.sum(torch.isfinite(y_pred))}')
+    # print(y_pred.shape)
+    # plt.figure()
+    # plt.plot(y_pred[:,0].cpu().detach().numpy(), label='pred')
+    # plt.pause(0.01)
+    # y_pred_fft = torch.abs(torch.fft.rfft(y_pred, dim=0, n=n_fft, norm='backward'))
+    # y_pred_fft = torch.fft.rfft(y_pred, dim=0, n=n_fft, norm='backward')
+    y_pred_fft = conv(torch.abs(torch.fft.rfft(y_pred, dim=0, n=n_fft)), smoothing_kernel)
+    
+    # return y_pred, y_pred_fft
+    # print(torch.sum(y_pred_fft))
+    # return torch.sum(y_pred_fft)*0
+    # return 0
+
+    # plt.figure()
+    # plt.plot(y_pred_fft[:,0].cpu().detach().numpy(), label='pred')
+    # plt.plot(y_true_fft[:,0].cpu().detach().numpy(), label='pred')
+    # plt.pause(0.01)
+
+    # print(y_pred_fft.shape)
+    # print(f'after {torch.sum(torch.isnan(y_pred_fft))}')
+    
+    # if smoothing_kernel is not None:
+    #     y_pred_fft = conv(y_pred_fft, smoothing_kernel)
+    #     # y_pred_fft = conv(y_pred_fft, smoothing_kernel, padding='same')
+    # else:
+    #     y_pred_fft = y_pred_fft[(y_true_fft.shape[0]-y_pred_fft.shape[0])//2 : -(y_true_fft.shape[0]-y_pred_fft.shape[0])//2]
+
+    # compute the MFSE (mean fractional squared error) of the spectrums
+    # mse = torch.mean((y_pred_fft - y_true_fft)**2)
+    mse = torch.mean(((y_pred_fft - y_true_fft) / (y_true_fft+1e-8))**2)
+    # mse = torch.mean((torch.log(y_pred_fft**2) - torch.log(y_true_fft**2))**2)
+    # mse = torch.mean(torch.log(torch.abs(y_pred_fft - y_true_fft)**2 + 1e-8))
+    # mse = torch.mean((torch.abs(y_pred_fft - y_true_fft))**2)
+    # mse = torch.mean((torch.abs(y_pred_fft) - torch.abs(y_true_fft))**2)
+    # mse = torch.mean((torch.abs(y_pred_fft - y_true_fft)/ torch.abs(y_true_fft))**2)
+    # mse = torch.mean((torch.abs(y_pred_fft - y_true_fft))**2)
+    # mse = torch.mean(torch.abs((y_pred_fft - y_true_fft)**2))
+    # mse = torch.mean(((torch.abs(y_pred_fft - y_true_fft)**2)/torch.abs(y_true_fft)))
+    # mse = torch.mean(( (torch.abs(y_pred_fft) - torch.abs(y_true_fft))**2 ) / torch.abs(y_true_fft))
+    # mse = torch.mean(torch.log((torch.abs(y_pred_fft - y_true_fft))**2))
+    # mse = torch.mean((torch.abs(y_pred_fft - y_true_fft)))
+    # mse = torch.mean(((y_pred_fft - y_true_fft)/y_true_fft)**2)
+    # mse = torch.abs(torch.mean(((y_pred_fft - y_true_fft)/y_true_fft)**2))
+    # print(mse.dtype)
+    # mse = mse.float()
+    
+    if plot_pref:
+        plt.figure()
+        plt.plot(y_true_fft[:,0].cpu().detach().numpy(), label='pred')
+        plt.plot(y_pred_fft[:,0].cpu().detach().numpy(), label='pred')
+        plt.xlabel('smooth')
+        plt.pause(0.01)
+
+    # print(mse * lam)
+    return mse * lam
+    
+
 
 # def L1_penalty(B_cp, lambda_L2):
 #     """
@@ -699,7 +831,7 @@ def conv_linear(X:torch.Tensor, kernel:list, Bcp:list, weights, non_negative, bi
 #     return penalty
 def L2_penalty(B_cp, lambda_L2):
     """
-    Compute the L2 penalty.
+    Computes the L2 penalty.
     RH 2021
 
     Args:
@@ -714,7 +846,29 @@ def L2_penalty(B_cp, lambda_L2):
     penalty=0
     for ii, comp in enumerate(B_cp):
         penalty+= torch.sqrt(torch.sum(comp**2)) * lambda_L2[ii]
+    return penalty
 
+def diff_highOrder(traces, order):
+    for ii in range(order):
+        traces = torch.diff(traces, dim=0)
+    return traces
+def smoothness_penalty(Bcp_w, derivative_order=2, lambda_smooth=1):
+    """
+    Computes the smoothness penalty.
+    RH 2021
+
+    Args:
+        Bcp_w (list of torch.Tensor):
+            Beta Kruskal tensor (before softplus)
+    
+    Returns:
+        smoothness_penalty (torch.Tensor):
+            Smoothness penalty.
+    """
+
+    penalty=0
+    for ii, comp in enumerate(Bcp_w):
+        penalty+= torch.mean(diff_highOrder(comp, order=derivative_order)**2) * lambda_smooth
     return penalty
 
 
@@ -762,6 +916,8 @@ class CP_linear_regression():
                     n_complex_dim=0, 
                     bias_init=0, 
                     device='cpu', 
+                    do_spectralPenalty=False,
+                    spectrum_smoothing_factor=100,
                     softplus_kwargs=None):
         """
         Multinomial logistic CP tensor regression class.
@@ -871,8 +1027,17 @@ class CP_linear_regression():
         else:
             self.Bcp_n = Bcp_init[1]
             self.Bcp_w = Bcp_init[0]
-        
 
+        
+        ####### INIT FOR SPECTRUM PENALTY #######
+        self.do_spectralPenalty = do_spectralPenalty
+        self.spectral_smoothing_kernel = torch.tensor(
+            gaussian(
+                np.arange(-(spectrum_smoothing_factor//2),
+                spectrum_smoothing_factor//2+1),
+                0,
+                spectrum_smoothing_factor/7)[0],
+             dtype=self.dtype, requires_grad=False, device=self.device)
 
         self.loss_running = []
 
@@ -880,6 +1045,9 @@ class CP_linear_regression():
             X,
             y,
             lambda_L2=0.01, 
+            lambda_spectralPenalty=0.01,
+            lambda_smooth=0.01,
+            smooth_diff_order=2,
             max_iter=1000, 
             tol=1e-5, 
             patience=10,
@@ -941,20 +1109,48 @@ class CP_linear_regression():
             if len(lambda_L2) == 1:
                 lambda_L2 = torch.tensor([lambda_L2]*(1 + len(self.Bcp_n)), device=X.device, dtype=self.dtype)
         
+        if self.do_spectralPenalty:
+            self.y_spectrum = conv(torch.abs(torch.fft.rfft(y[self.idx_conv], n=self.y_shape[0], dim=0)), self.spectral_smoothing_kernel) # note whether you do padding='same' or not and apply the same to spectral penalty
+        else:
+            self.y_spectrum = None
 
         tl.set_backend('pytorch')
 
         self.optimizer = torch.optim.LBFGS(self.Bcp_n + self.Bcp_w + [self.bias], **LBFGS_kwargs)
+        loss_fn = torch.nn.MSELoss()
+
+        def loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty):
+            loss_rec = loss_fn(y_hat, y[self.idx_conv])
+            loss_L2_w = L2_penalty(self.Bcp_w, [lambda_L2[0]]*2)
+            loss_L2_n = L2_penalty(self.Bcp_n, lambda_L2[1:])
+            loss_spectral = spectral_penalty(   y_pred=y_hat, 
+                                        y_true_fft=self.y_spectrum, 
+                                        n_fft=self.y_shape[0],
+                                        smoothing_kernel=self.spectral_smoothing_kernel, 
+                                        passthrough=1-self.do_spectralPenalty, 
+                                        lam=lambda_spectralPenalty,
+                                        plot_pref=False)
+            loss_smoothness = smoothness_penalty(self.Bcp_w, derivative_order=smooth_diff_order, lambda_smooth=lambda_smooth)
+            loss_all = loss_rec + loss_L2_w + loss_L2_n + loss_spectral + loss_smoothness
+            return loss_all, loss_rec.item(), loss_L2_w.item(), loss_L2_n.item(), loss_spectral.item(), loss_smoothness.item()
 
         def closure():
             self.optimizer.zero_grad()
             y_hat = conv_linear(X, self.Bcp_w, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
-            loss = loss_fn(y_hat, y[self.idx_conv]) + L2_penalty(self.Bcp_w, [lambda_L2[0]]*2) + L2_penalty(self.Bcp_n, lambda_L2[1:])
+            loss, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness =  loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty)
             loss.backward()
             return loss
-            
-        loss_fn = torch.nn.MSELoss()
-
+        
+        def print_info(iter, loss_all, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio, precis=5):
+            print(f'Iter: {iter}, \
+loss: {loss_all:.{precis}}, \
+loss_rec: {loss_rec:.{precis}}, \
+loss_L2_w: {loss_L2_w:.{precis}}, \
+loss_L2_n: {loss_L2_n:.{precis}}, \
+loss_spectral: {loss_spectral:.{precis}}, \
+loss_smoothness: {loss_smoothness:.{precis}}, \
+var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
+              
         if verbose==3:
             self.fig, self.axs = plt.subplots(2 + len(self.Bcp_n) + self.rank_spectral + self.rank_normal, figsize=(7,20))
 
@@ -963,14 +1159,15 @@ class CP_linear_regression():
             if ii%running_loss_logging_interval == 0:
 
                 y_hat = conv_linear(X, self.Bcp_w, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
-
-                self.loss_running.append((loss_fn(y_hat, y[self.idx_conv]) + L2_penalty(self.Bcp_w, [lambda_L2[0]]*2) + L2_penalty(self.Bcp_n, lambda_L2[1:])).item())
+                
+                loss, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness =  loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty)
+                self.loss_running.append(loss.item())
                 if verbose==2:
-                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
+                    print_info(ii, self.loss_running[-1], loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio=torch.var(y_hat.detach()).item() / torch.var(y).item())            
                 elif verbose==3:
                     self.update_plot_outputs(self.fig, self.axs)
                     # plt.pause(0.01)
-                    print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
+                    print_info(ii, self.loss_running[-1], loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio=torch.var(y_hat.detach()).item() / torch.var(y).item())            
             if len(self.loss_running) > patience:
                 if np.sum(np.abs(np.diff(self.loss_running[-patience+1:]))) < tol:
                     convergence_reached = True
@@ -991,6 +1188,7 @@ class CP_linear_regression():
 
     def fit_Adam(self,X,y,
             lambda_L2=0.01, 
+            lambda_spectralPenalty=None,
             max_iter=1000, 
             tol=1e-5, 
             patience=10,
@@ -1043,9 +1241,35 @@ class CP_linear_regression():
 
         tl.set_backend('pytorch')
 
+        if self.do_spectralPenalty:
+            # self.y_spectrum = conv(torch.abs(torch.fft.rfft(y[self.idx_conv], n=self.y_shape[0], dim=0)), self.spectral_smoothing_kernel) # note whether you do padding='same' or not and apply the same to spectral penalty
+            # self.y_spectrum = conv(torch.fft.rfft(y[self.idx_conv], n=self.y_shape[0], dim=0), self.spectral_smoothing_kernel.cfloat()) # note whether you do padding='same' or not and apply the same to spectral penalty
+            self.y_spectrum = torch.fft.rfft(y[self.idx_conv], n=self.y_shape[0], dim=0) # note whether you do padding='same' or not and apply the same to spectral penalty
+            # self.y_spectrum = torch.abs(torch.fft.rfft(y[self.idx_conv], n=y.shape[0], dim=0)) # note whether you do padding='same' or not and apply the same to spectral penalty
+        else:
+            self.y_spectrum = None
+        plt.figure()
+        plt.plot(y[self.idx_conv].cpu().detach().numpy())
+        plt.figure()
+        plt.plot(self.y_spectrum.cpu().detach().numpy())
+
         self.optimizer = torch.optim.Adam(self.Bcp_n + self.Bcp_w + [self.bias], **Adam_kwargs)
         # optimizer = torch.optim.Adam(self.Bcp + [self.weights], **Adam_kwargs)
         loss_fn = torch.nn.MSELoss()
+
+        def loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty):
+            loss_rec = loss_fn(y_hat, y[self.idx_conv])
+            loss_L2_w = L2_penalty(self.Bcp_w, [lambda_L2[0]]*2)
+            loss_L2_n = L2_penalty(self.Bcp_n, lambda_L2[1:])
+            loss_spectral = spectral_penalty(   y_pred=y_hat, 
+                                        y_true_fft=self.y_spectrum, 
+                                        n_fft=self.y_shape[0],
+                                        smoothing_kernel=self.spectral_smoothing_kernel, 
+                                        passthrough=1-self.do_spectralPenalty, 
+                                        lam=lambda_spectralPenalty,
+                                        plot_pref=False)
+            loss_all = loss_rec + loss_L2_w + loss_L2_n + loss_spectral
+            return loss_all, loss_rec.item(), loss_L2_w.item(), loss_L2_n.item(), loss_spectral.item()
 
         if verbose==3:
             self.fig, self.axs = plt.subplots(1 + len(self.Bcp_n) + self.rank_spectral + self.rank_normal, figsize=(7,20))
@@ -1054,9 +1278,9 @@ class CP_linear_regression():
         for ii in range(max_iter):
             self.optimizer.zero_grad()
 
-            y_hat = conv_linear(X, self.Bcp_w, self.Bcp_n, self.weights[:self.rank_normal], self.non_negative, self.bias)
+            y_hat = conv_linear(X, self.Bcp_w, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
 
-            loss = loss_fn(y_hat, y[self.idx_conv]) + L2_penalty(self.Bcp_w, [lambda_L2[0]]*2) + L2_penalty(self.Bcp_n, lambda_L2[1:])
+            loss =  loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty)[0]
             loss.backward()
             self.optimizer.step()
             self.loss_running.append(loss.item())
