@@ -868,7 +868,8 @@ def smoothness_penalty(Bcp_w, derivative_order=2, lambda_smooth=1):
 
     penalty=0
     for ii, comp in enumerate(Bcp_w):
-        penalty+= torch.mean(diff_highOrder(comp, order=derivative_order)**2) * lambda_smooth
+        if comp.numel() > 0:
+            penalty+= torch.mean(diff_highOrder(comp, order=derivative_order)**2) * lambda_smooth
     return penalty
 
 
