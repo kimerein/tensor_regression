@@ -987,6 +987,9 @@ class CP_linear_regression():
         else:
             self.softplus_kwargs = softplus_kwargs
 
+        self.X_shape = X_shape
+        self.y_shape = y_shape
+
         self.rank_normal = rank_normal
         self.temporal_window = temporal_window
         self.idx_conv = self.get_idxConv(X_shape[0]).to(device)
@@ -1631,54 +1634,68 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
         Bcp_w_nonNeg = [Bcp_w[ii].detach().cpu().numpy() for ii in range(len(Bcp_w))]
         return Bcp_n_nonNeg , Bcp_w_nonNeg
     
-    # def detach_Bcp(self):
-    #     """
-    #     Detach the Bcp Kruskal tensor list.
-    #     RH 2021
+    def detach_Bcp(self):
+        """
+        Detach the Bcp Kruskal tensor list.
+        RH 2021
 
-    #     Returns:
-    #         Bcp_detached (list of np.ndarray):
-    #             Detached Bcp tensors.
-    #     """
-    #     Bcp_n_detached = [Bcp.detach().cpu().numpy() for Bcp in self.Bcp_n]
-    #     Bcp_c_detached = [Bcp.detach().cpu().numpy() for Bcp in self.Bcp_c]
-    #     return Bcp_n_detached, Bcp_c_detached
+        Returns:
+            Bcp_detached (list of np.ndarray):
+                Detached Bcp tensors.
+        """
+        Bcp_n_detached = [Bcp.detach().cpu().numpy() for Bcp in self.Bcp_n]
+        Bcp_w_detached = [Bcp.detach().cpu().numpy() for Bcp in self.Bcp_w]
+        return Bcp_n_detached, Bcp_w_detached
 
-    # def get_params(self):
-    #     """
-    #     Get the parameters of the model.
-    #     RH 2021
-    #     """
-    #     return {
-    #             # 'X': self.X.detach().cpu().numpy(),
-    #             # 'y': self.y.detach().cpu().numpy(),
-    #             'weights': self.weights.detach().cpu().numpy(),
-    #             'Bcp_n': self.detach_Bcp()[0],
-    #             'Bcp_w': self.detach_Bcp()[1],
-    #             'non_negative': self.non_negative,
-    #             'softplus_kwargs': self.softplus_kwargs,
-    #             'rank': self.rank,
-    #             'device': self.device,
-    #             'loss_running': self.loss_running}
+    def get_params(self):
+        """
+        Get the parameters of the model.
+        RH 2021
+        """
+        return {
+                'X_shape': self.X_shape,
+                'y_shape': self.y_shape,
+                'dtype': self.dtype,
+                'device': self.device,
+                'weights': self.weights.detach().cpu().numpy(),
+                'Bcp_n': [Bcp.detach().cpu().numpy() for Bcp in self.Bcp_n],
+                'Bcp_w': [Bcp.detach().cpu().numpy() for Bcp in self.Bcp_w],
+                'bias': self.bias.detach().cpu().numpy(),
+                'non_negative': self.non_negative,
+                'softplus_kwargs': self.softplus_kwargs,
+                'rank': self.rank,
+                'rank_normal': self.rank_normal,
+                'rank_spectral': self.rank_spectral,
+                'idxConv': self.idx_conv,
+                'spectral_smoothing_kernel': self.spectral_smoothing_kernel,
+                'temporal_window': self.temporal_window,
+                'do_spectralPenalty': self.do_spectralPenalty,
+                'loss_running': self.loss_running}
 
     def set_params(self, params):
         """
         Set the parameters of the model.
         RH 2021
-
-        Args:
-            params (dict):
-                Dictionary of parameters.
         """
-        # self.X = params['X']
-        # self.y = params['y']
-        self.weights = params['weights']
-        self.Bcp = params['Bcp']
+        self.X_shape = params['X_shape']
+        self.y_shape = params['y_shape']
+        self.dtype = params['dtype']
+        self.device = params['device']
+        self.weights = torch.tensor(params['weights'], dtype=self.dtype, requires_grad=False).to(self.device)
+        self.Bcp_n = [torch.tensor(Bcp, dtype=self.dtype, requires_grad=False).to(self.device) for Bcp in params['Bcp_n']]
+        self.Bcp_w = [torch.tensor(Bcp, dtype=self.dtype, requires_grad=False).to(self.device) for Bcp in params['Bcp_w']]
+        self.bias = torch.tensor(params['bias'], dtype=self.dtype, requires_grad=False).to(self.device)
         self.non_negative = params['non_negative']
         self.softplus_kwargs = params['softplus_kwargs']
         self.rank = params['rank']
-        self.device = params['device']
+        self.rank_normal = params['rank_normal']
+        self.rank_spectral = params['rank_spectral']
+        self.idx_conv = params['idxConv']
+        self.spectral_smoothing_kernel = params['spectral_smoothing_kernel']
+        self.temporal_window = params['temporal_window']
+        self.do_spectralPenalty = params['do_spectralPenalty']
         self.loss_running = params['loss_running']
+
 
     def display_params(self):
         """
