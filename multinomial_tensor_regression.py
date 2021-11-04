@@ -13,30 +13,26 @@ import tensorly as tl
 ######## Useful functions ##########
 ####################################
 
-def squeeze_integers(arr):
+def squeeze_integers(intVec):
     """
     Make integers in an array consecutive numbers
      starting from 0. ie. [7,2,7,4,1] -> [3,2,3,1,0].
     Useful for removing unused class IDs from y_true
      and outputting something appropriate for softmax.
+    This is v2. The old version is busted.
     RH 2021
-
+    
     Args:
-        arr (np.ndarray):
-            array of integers.
+        intVec (np.ndarray):
+            1-D array of integers.
     
     Returns:
-        arr_squeezed (np.ndarray):
-            array of integers with consecutive numbers
+        intVec_squeezed (np.ndarray):
+            1-D array of integers with consecutive numbers
     """
-    uniques = np.unique(arr)
-    arr_squeezed = copy.deepcopy(arr)
-    for val in np.arange(0, np.max(arr)+1):
-        if np.isin(val, uniques):
-            continue
-        else:
-            arr_squeezed[arr_squeezed>val] = arr_squeezed[arr_squeezed>val]-1
-    return arr_squeezed
+    uniques = np.unique(intVec)
+    unique_positions = np.arange(len(uniques))
+    return unique_positions[np.array([np.where(intVec[ii]==uniques)[0] for ii in range(len(test))]).squeeze()]
 
 
 ####################################
