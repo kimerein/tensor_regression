@@ -1195,7 +1195,8 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
             lambda_spectralPenalty=None,
             max_iter=1000, 
             tol=1e-5, 
-            patience=10,
+            patience=10,            
+            smooth_diff_order=2,
             verbose=False,
             plotting_interval=100,
             Adam_kwargs=None):
@@ -1245,17 +1246,16 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
 
         tl.set_backend('pytorch')
 
+        if isinstance(lambda_L2, int) or isinstance(lambda_L2, float):
+            lambda_L2 = torch.tensor([lambda_L2]*(1 + len(self.Bcp_n)), device=X.device, dtype=self.dtype)
+        elif isinstance(lambda_L2, list):
+            if len(lambda_L2) == 1:
+                lambda_L2 = torch.tensor([lambda_L2]*(1 + len(self.Bcp_n)), device=X.device, dtype=self.dtype)
+        
         if self.do_spectralPenalty:
-            # self.y_spectrum = conv(torch.abs(torch.fft.rfft(y[self.idx_conv], n=self.y_shape[0], dim=0)), self.spectral_smoothing_kernel) # note whether you do padding='same' or not and apply the same to spectral penalty
-            # self.y_spectrum = conv(torch.fft.rfft(y[self.idx_conv], n=self.y_shape[0], dim=0), self.spectral_smoothing_kernel.cfloat()) # note whether you do padding='same' or not and apply the same to spectral penalty
-            self.y_spectrum = torch.fft.rfft(y[self.idx_conv], n=self.y_shape[0], dim=0) # note whether you do padding='same' or not and apply the same to spectral penalty
-            # self.y_spectrum = torch.abs(torch.fft.rfft(y[self.idx_conv], n=y.shape[0], dim=0)) # note whether you do padding='same' or not and apply the same to spectral penalty
+            self.y_spectrum = conv(torch.abs(torch.fft.rfft(y[self.idx_conv], n=self.y_shape[0], dim=0)), self.spectral_smoothing_kernel) # note whether you do padding='same' or not and apply the same to spectral penalty
         else:
             self.y_spectrum = None
-        plt.figure()
-        plt.plot(y[self.idx_conv].cpu().detach().numpy())
-        plt.figure()
-        plt.plot(self.y_spectrum.cpu().detach().numpy())
 
         self.optimizer = torch.optim.Adam(self.Bcp_n + self.Bcp_w + [self.bias], **Adam_kwargs)
         # optimizer = torch.optim.Adam(self.Bcp + [self.weights], **Adam_kwargs)
@@ -1272,30 +1272,41 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
                                         passthrough=1-self.do_spectralPenalty, 
                                         lam=lambda_spectralPenalty,
                                         plot_pref=False)
-            loss_all = loss_rec + loss_L2_w + loss_L2_n + loss_spectral
-            return loss_all, loss_rec.item(), loss_L2_w.item(), loss_L2_n.item(), loss_spectral.item()
+            loss_smoothness = smoothness_penalty(self.Bcp_w, derivative_order=smooth_diff_order, lambda_smooth=lambda_smooth)
+            loss_all = loss_rec + loss_L2_w + loss_L2_n + loss_spectral + loss_smoothness
+            return loss_all, loss_rec.item(), loss_L2_w.item(), loss_L2_n.item(), loss_spectral.item(), loss_smoothness.item()
 
         if verbose==3:
             self.fig, self.axs = plt.subplots(1 + len(self.Bcp_n) + self.rank_spectral + self.rank_normal, figsize=(7,20))
+
+        def print_info(iter, loss_all, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio, precis=5):
+            print(f'Iter: {iter}, \
+loss: {loss_all:.{precis}}, \
+loss_rec: {loss_rec:.{precis}}, \
+loss_L2_w: {loss_L2_w:.{precis}}, \
+loss_L2_n: {loss_L2_n:.{precis}}, \
+loss_spectral: {loss_spectral:.{precis}}, \
+loss_smoothness: {loss_smoothness:.{precis}}, \
+var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
 
         convergence_reached = False
         for ii in range(max_iter):
             self.optimizer.zero_grad()
 
             y_hat = conv_linear(X, self.Bcp_w, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
-
-            loss =  loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty)[0]
+            
+            loss, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness =  loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty)
             loss.backward()
             self.optimizer.step()
             self.loss_running.append(loss.item())
             if verbose==2:
-                print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
-            elif verbose==3 and ii%plotting_interval == 0:
+                print_info(ii, self.loss_running[-1], loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio=torch.var(y_hat.detach()).item() / torch.var(y).item())            
+            elif verbose==3:
                 self.update_plot_outputs(self.fig, self.axs)
                 # plt.pause(0.01)
-                print(f'Iteration: {ii}, Loss: {self.loss_running[-1]}  ;  Variance ratio (y_hat / y_true): {torch.var(y_hat.detach()).item() / torch.var(y).item()}' )
-            if ii > patience:
-                if np.sum(np.abs(np.diff(self.loss_running[ii-patience:]))) < tol:
+                print_info(ii, self.loss_running[-1], loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio=torch.var(y_hat.detach()).item() / torch.var(y).item())            
+            if len(self.loss_running) > patience:
+                if np.sum(np.abs(np.diff(self.loss_running[-patience+1:]))) < tol:
                     convergence_reached = True
                     break
             elif np.isnan(self.loss_running[-1]):
@@ -1608,7 +1619,7 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
     #             # spectral_model(X, Bcp_c, self.weights[self.rank_normal:], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
     #     # y_hat = spectral_model(X, Bcp_c, self.weights[self.rank_normal:], self.non_negative, self.bias, softplus_kwargs=self.softplus_kwargs)
 
-        return y_hat.cpu().detach().numpy()
+        # return y_hat.cpu().detach().numpy()
 
 
     def get_idxConv(self, input_length):
