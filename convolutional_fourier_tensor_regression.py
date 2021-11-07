@@ -1678,11 +1678,12 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
                 'rank': self.rank,
                 'rank_normal': self.rank_normal,
                 'rank_spectral': self.rank_spectral,
-                'idxConv': self.idx_conv,
-                'spectral_smoothing_kernel': self.spectral_smoothing_kernel,
+                'idxConv': self.idx_conv.detach().cpu().numpy(),
+                'spectral_smoothing_kernel': self.spectral_smoothing_kernel.detach().cpu().numpy(),
                 'temporal_window': self.temporal_window,
                 'do_spectralPenalty': self.do_spectralPenalty,
-                'loss_running': self.loss_running}
+                'loss_running': self.loss_running
+                }
 
     def set_params(self, params):
         """
@@ -1693,17 +1694,17 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
         self.y_shape = params['y_shape']
         self.dtype = params['dtype']
         self.device = params['device']
-        self.weights = torch.tensor(params['weights'], dtype=self.dtype, requires_grad=False).to(self.device)
-        self.Bcp_n = [torch.tensor(Bcp, dtype=self.dtype, requires_grad=False).to(self.device) for Bcp in params['Bcp_n']]
-        self.Bcp_w = [torch.tensor(Bcp, dtype=self.dtype, requires_grad=False).to(self.device) for Bcp in params['Bcp_w']]
-        self.bias = torch.tensor(params['bias'], dtype=self.dtype, requires_grad=False).to(self.device)
+        self.weights = torch.as_tensor(params['weights'], dtype=self.dtype, requires_grad=False).to(self.device)
+        self.Bcp_n = [torch.as_tensor(Bcp, dtype=self.dtype, requires_grad=False).to(self.device) for Bcp in params['Bcp_n']]
+        self.Bcp_w = [torch.as_tensor(Bcp, dtype=self.dtype, requires_grad=False).to(self.device) for Bcp in params['Bcp_w']]
+        self.bias = torch.as_tensor(params['bias'], dtype=self.dtype, requires_grad=False).to(self.device)
         self.non_negative = params['non_negative']
         self.softplus_kwargs = params['softplus_kwargs']
         self.rank = params['rank']
         self.rank_normal = params['rank_normal']
         self.rank_spectral = params['rank_spectral']
-        self.idx_conv = params['idxConv']
-        self.spectral_smoothing_kernel = params['spectral_smoothing_kernel']
+        self.idx_conv = torch.as_tensor(params['idxConv'], dtype=self.dtype, requires_grad=False).to(self.device)
+        self.spectral_smoothing_kernel = torch.as_tensor(params['spectral_smoothing_kernel'], dtype=self.dtype, requires_grad=False).to(self.device)
         self.temporal_window = params['temporal_window']
         self.do_spectralPenalty = params['do_spectralPenalty']
         self.loss_running = params['loss_running']
