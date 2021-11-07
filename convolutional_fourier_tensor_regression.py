@@ -1192,11 +1192,12 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
 
     def fit_Adam(self,X,y,
             lambda_L2=0.01, 
-            lambda_spectralPenalty=None,
+            lambda_spectralPenalty=0.01,
+            lambda_smooth=0.01,
+            smooth_diff_order=2,
             max_iter=1000, 
             tol=1e-5, 
             patience=10,            
-            smooth_diff_order=2,
             verbose=False,
             plotting_interval=100,
             Adam_kwargs=None):
