@@ -112,3 +112,7 @@ def make_WindowedDataloader(X, y, win_range=[-10,10], batch_size=64, drop_last=T
                             )
     dataloader.sample_shape = [dataloader.batch_size] + list(dataset[-win_range[0]][0].shape)
     return dataloader, dataset, sampler
+
+
+def test():
+    print('hi')

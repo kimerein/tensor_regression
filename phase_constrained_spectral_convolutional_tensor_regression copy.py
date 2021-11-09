@@ -873,29 +873,62 @@ def smoothness_penalty(Bcp_w, derivative_order=2, lambda_smooth=1):
     return penalty
 
 
-# def hann_win(Bcp_w, device='cpu'):
-#     """
-#     Apply Hann window to each component of Bcp.
-#     RH 2021
+class shift_signal_angle_obj():
+    def __init__(self, signal_len, shift_angle=90, deg_or_rad='deg', discard_imaginary_component=True):
+        """
+        Initializes the shift_signal_angle_obj class.
+        This is the object version. It can be faster than
+         the functional version if needing to call it 
+         multiple times.
+        See __call__ for more details.
+        RH 2021
 
-#     Args:
-#         Bcp_w (list of torch.Tensor):
-#             Beta Kruskal tensor (before softplus)
-    
-#     Returns:
-#         Bcp_w (list of torch.Tensor):
-#             Beta Kruskal tensor (before softplus) with Hann window applied.
-#     """
-#     # for ii in range(len(Bcp_w)):
-#     #     Bcp_w[ii] = Bcp_w[ii] * torch.hann_window(Bcp_w[ii].shape[-1], device=device)
-#     # print(Bcp_w[0].shape)
-#     # print(torch.hann_window(Bcp_w[0].shape[0], device=device)[:,None,None].shape)
-#     # Bcp_w[0] = 
-#     # plt.figure()
-#     # plt.plot((Bcp_w[0] * torch.hann_window(Bcp_w[0].shape[0], device=device)[:,None,None]).cpu().detach().squeeze())
-#     # return [Bcp_w[0] * torch.hann_window(Bcp_w[0].shape[0], device=device)[:,None,None]]
-#     # return [Bcp_w[0] / (torch.hann_window(Bcp_w[0].shape[0], device=device)[:,None,None] + 1e-2)]
-#     return [Bcp_w[0] ]
+        Args:
+            signal_len (int):
+                The length of the signal to be shifted
+            shift_angle (float):
+                The amount to shift the angle by
+            deg_or_rad (str):
+                Whether the shift_angle is in degrees or radians
+            discard_imaginary_component (bool):
+                Whether to discard the imaginary component of the signal
+        """
+        self.input_shift_angle = shift_angle
+        self.deg_or_rad = deg_or_rad
+        self.shift_angle = np.deg2rad(shift_angle) if deg_or_rad == 'deg' else shift_angle
+
+        if type(signal_len) is not torch.Tensor:
+            signal_len = torch.as_tensor(signal_len)
+        half_len_minus = int(torch.ceil(signal_len/2))
+        half_len_plus = int(torch.floor(signal_len/2))
+        self.angle_mask = torch.cat([-torch.ones(half_len_minus), torch.ones(half_len_plus)]) * self.shift_angle
+        self.discard_imaginary_component = discard_imaginary_component
+
+    def __call__(self, signal, dim=0):
+        """
+        Shifts the frequency angles of a signal by a given amount.
+        A signal containing multiple frequecies will see each 
+         frequency shifted independently by the shift_angle.
+        RH 2021
+
+        Args:
+            signal (torch.Tensor):
+                The signal to be shifted
+            dim (int):
+                The axis to shift along
+            
+        Returns:
+            output (torch.Tensor):
+                The shifted signal
+        """
+        signal_fft = torch.fft.fft(signal, dim=dim) # convert to spectral domain
+        mag, ang = torch.abs(signal_fft), torch.angle(signal_fft) # extract magnitude and angle
+        ang_shifted = ang + self.angle_mask # shift the angle
+        signal_fft_shifted = mag * torch.exp(1j*ang_shifted) # remix magnitude and angle
+        signal_shifted = torch.fft.ifft(signal_fft_shifted, dim=dim) # convert back to signal domain
+        if self.discard_imaginary_component:
+            signal_shifted = torch.real(signal_shifted) # discard imaginary component
+        return signal_shifted
 
 
 ####################################
