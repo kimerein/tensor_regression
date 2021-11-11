@@ -691,7 +691,7 @@ def stepwise_linear_model_multirank(X, Bcp, weights, bias):
 #     return X_1c
 
 # @torch.jit.script
-def forward_model(X:torch.Tensor, kernel:list, Bcp:list, weights, non_negative, bias, softplus_kwargs=None):
+def forward_model(X:torch.Tensor, kernel:list, shifter, Bcp:list, weights, non_negative, bias, softplus_kwargs=None):
     """
 
     RH 2021
@@ -706,16 +706,31 @@ def forward_model(X:torch.Tensor, kernel:list, Bcp:list, weights, non_negative, 
     if rank_n > 0 and rank_s > 0:
         X_conv =  [conv(X, kernel_nn[0]).squeeze(-1)[..., None]]
         # X_conv[0] = X_conv[0].squeeze(-1)[..., None]
-        X_conv += [complex_magnitude(conv(X, kernel_nn[1]))]
+        # X_conv += [complex_magnitude(conv(X, kernel_nn[1]))]
         # X_conv[1] = complex_magnitude(X_conv[1])
-        X_conv = torch.cat(X_conv, dim=-1)
+        X_conv += [torch.norm(torch.stack([ conv(X,
+                                               shifter(kernel_nn[1],
+                                                       shift_angle=shift,
+                                                       deg_or_rad='deg',
+                                                       dim=0)).squeeze(-1)
+                                          for shift in [0,90] ],
+                                        dim=-1),
+                             dim=-1)]
+
+        X_conv = torch.stack(X_conv, dim=-1)
 
     elif rank_n > 0 and rank_s == 0:
         X_conv =  conv(X, kernel_nn[0]).squeeze(-1)
 
     elif rank_n == 0 and rank_s > 0:
-        X_conv =  conv(X, kernel_nn[1])
-        X_conv = complex_magnitude(X_conv)
+        X_conv = torch.norm(torch.stack([ conv(X,
+                                               shifter(kernel_nn[1],
+                                                       shift_angle=shift,
+                                                       deg_or_rad='deg',
+                                                       dim=0)).squeeze(-1)
+                                          for shift in [0,90] ],
+                                        dim=-1),
+                             dim=-1)
 
     pred =  stepwise_linear_model_multirank(X_conv, Bcp_nn, weights, bias)
 
@@ -873,8 +888,8 @@ def smoothness_penalty(Bcp_w, derivative_order=2, lambda_smooth=1):
     return penalty
 
 
-class shift_signal_angle_obj():
-    def __init__(self, signal_len, shift_angle=90, deg_or_rad='deg', discard_imaginary_component=True):
+class phase_shifter():
+    def __init__(self, signal_len, discard_imaginary_component=True, device='cpu', dtype=torch.float32, pin_memory=False):
         """
         Initializes the shift_signal_angle_obj class.
         This is the object version. It can be faster than
@@ -885,26 +900,29 @@ class shift_signal_angle_obj():
 
         Args:
             signal_len (int):
-                The length of the signal to be shifted
-            shift_angle (float):
-                The amount to shift the angle by
-            deg_or_rad (str):
-                Whether the shift_angle is in degrees or radians
+                The shape of the signal to be shifted.
+                The first (0_th) dimension must be the shift dimension.
             discard_imaginary_component (bool):
                 Whether to discard the imaginary component of the signal
+            device (str):
+                The device to put self.angle_mask on
+            dtype (torch.dtype):
+                The dtype to use for self.angle_mask
+            pin_memory (bool):
+                Whether to pin self.angle_mask to memory
         """
-        self.input_shift_angle = shift_angle
-        self.deg_or_rad = deg_or_rad
-        self.shift_angle = np.deg2rad(shift_angle) if deg_or_rad == 'deg' else shift_angle
 
-        if type(signal_len) is not torch.Tensor:
-            signal_len = torch.as_tensor(signal_len)
+        self.signal_len = signal_len
+        signal_len = torch.as_tensor(signal_len)
         half_len_minus = int(torch.ceil(signal_len/2))
         half_len_plus = int(torch.floor(signal_len/2))
-        self.angle_mask = torch.cat([-torch.ones(half_len_minus), torch.ones(half_len_plus)]) * self.shift_angle
+        self.angle_mask = torch.cat([
+            -torch.ones(half_len_minus, dtype=dtype, device=device, pin_memory=pin_memory),
+             torch.ones(half_len_plus,  dtype=dtype, device=device, pin_memory=pin_memory)
+             ])
         self.discard_imaginary_component = discard_imaginary_component
 
-    def __call__(self, signal, dim=0):
+    def __call__(self, signal, shift_angle=90, deg_or_rad='deg', dim=0):
         """
         Shifts the frequency angles of a signal by a given amount.
         A signal containing multiple frequecies will see each 
@@ -914,6 +932,10 @@ class shift_signal_angle_obj():
         Args:
             signal (torch.Tensor):
                 The signal to be shifted
+            shift_angle (float):
+                The amount to shift the angle by
+            deg_or_rad (str):
+                Whether the shift_angle is in degrees or radians
             dim (int):
                 The axis to shift along
             
@@ -921,9 +943,15 @@ class shift_signal_angle_obj():
             output (torch.Tensor):
                 The shifted signal
         """
+        
+        if shift_angle == 0:
+            return signal
+        
+        shift_angle = np.deg2rad(shift_angle) if deg_or_rad == 'deg' else shift_angle
+
         signal_fft = torch.fft.fft(signal, dim=dim) # convert to spectral domain
         mag, ang = torch.abs(signal_fft), torch.angle(signal_fft) # extract magnitude and angle
-        ang_shifted = ang + self.angle_mask # shift the angle
+        ang_shifted = ang + (self.angle_mask.reshape([len(self.angle_mask)] + [1]*(len(signal.shape)-1))) * shift_angle # shift the angle. The bit in the middle is for matching the shape of the signal
         signal_fft_shifted = mag * torch.exp(1j*ang_shifted) # remix magnitude and angle
         signal_shifted = torch.fft.ifft(signal_fft_shifted, dim=dim) # convert back to signal domain
         if self.discard_imaginary_component:
@@ -947,7 +975,7 @@ class CP_linear_regression():
                     weights=None, 
                     Bcp_init=None, 
                     Bcp_init_scale=1, 
-                    n_complex_dim=0, 
+                    # n_complex_dim=0, 
                     bias_init=0, 
                     device='cpu', 
                     do_spectralPenalty=False,
@@ -1050,9 +1078,15 @@ class CP_linear_regression():
 
         Bw_dims = [temporal_window]
 
+        self.shifter = phase_shifter(signal_len=temporal_window,
+                                     discard_imaginary_component=True,
+                                     device=self.device,
+                                     dtype=self.dtype,
+                                     pin_memory=False)
+
         if Bcp_init is None:
             self.Bcp_w = make_BcpInit(Bw_dims, self.rank_normal,   [self.non_negative[0]], complex_dims=None, scale=Bcp_init_scale, device=self.device, dtype=self.dtype) + \
-                         make_BcpInit(Bw_dims, self.rank_spectral, [self.non_negative[0]], complex_dims=[n_complex_dim+1], scale=Bcp_init_scale, device=self.device, dtype=self.dtype)
+                         make_BcpInit(Bw_dims, self.rank_spectral, [self.non_negative[0]], complex_dims=None, scale=Bcp_init_scale, device=self.device, dtype=self.dtype)
             
             self.Bcp_n = make_BcpInit(B_dims, self.rank_normal+self.rank_spectral, self.non_negative[1:], complex_dims=[1]*len(B_dims), scale=Bcp_init_scale, device=self.device, dtype=self.dtype) # 'normal Beta_cp Kruskal tensor'
 
@@ -1173,7 +1207,7 @@ class CP_linear_regression():
 
         def closure():
             self.optimizer.zero_grad()
-            y_hat = forward_model(X, self.Bcp_w, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
+            y_hat = forward_model(X, self.Bcp_w, self.shifter, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
             loss, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness =  loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty)
             loss.backward()
             return loss
@@ -1195,7 +1229,7 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
         for ii in range(max_iter):
             if ii%running_loss_logging_interval == 0:
 
-                y_hat = forward_model(X, self.Bcp_w, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
+                y_hat = forward_model(X, self.Bcp_w, self.shifter, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
                 
                 loss, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness =  loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty)
                 self.loss_running.append(loss.item())
@@ -1327,7 +1361,7 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
         for ii in range(max_iter):
             self.optimizer.zero_grad()
 
-            y_hat = forward_model(X, self.Bcp_w, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
+            y_hat = forward_model(X, self.Bcp_w, self.shifter, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
             
             loss, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness =  loss_all(y_hat, y, lambda_L2, lambda_spectralPenalty)
             loss.backward()
@@ -1569,7 +1603,7 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
             for ii in range(len(Bcp[1])):
                 Bcp_w[ii] = Bcp[1][ii].to(device)
         
-        y_hat = forward_model(X, self.Bcp_w, self.Bcp_n, self.weights[:self.rank_normal], self.non_negative, self.bias, self.softplus_kwargs)
+        y_hat = forward_model(X, self.Bcp_w, self.shifter, self.Bcp_n, self.weights[:self.rank_normal], self.non_negative, self.bias, self.softplus_kwargs)
 
         return y_hat.cpu().detach()
 

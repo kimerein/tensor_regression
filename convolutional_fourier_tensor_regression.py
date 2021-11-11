@@ -708,7 +708,7 @@ def forward_model(X:torch.Tensor, kernel:list, Bcp:list, weights, non_negative, 
         # X_conv[0] = X_conv[0].squeeze(-1)[..., None]
         X_conv += [complex_magnitude(conv(X, kernel_nn[1]))]
         # X_conv[1] = complex_magnitude(X_conv[1])
-        X_conv = torch.cat(X_conv, dim=-1)
+        X_conv = torch.stack(X_conv, dim=-1)
 
     elif rank_n > 0 and rank_s == 0:
         X_conv =  conv(X, kernel_nn[0]).squeeze(-1)
