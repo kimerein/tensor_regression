@@ -704,11 +704,14 @@ def forward_model(X:torch.Tensor, kernel:list, Bcp:list, weights, non_negative, 
     rank_s = kernel_nn[1].shape[1] if kernel_nn[1].ndim > 1 else kernel[1].ndim
 
     if rank_n > 0 and rank_s > 0:
-        X_conv =  [conv(X, kernel_nn[0]).squeeze(-1)[..., None]]
+        X_conv =  [conv(X, kernel_nn[0]).squeeze(-1)]
         # X_conv[0] = X_conv[0].squeeze(-1)[..., None]
         X_conv += [complex_magnitude(conv(X, kernel_nn[1]))]
         # X_conv[1] = complex_magnitude(X_conv[1])
-        X_conv = torch.stack(X_conv, dim=-1)
+        # print(X_conv[0].shape)
+        # print(X_conv[1].shape)
+        X_conv = torch.cat(X_conv, dim=-1)
+        # print(X_conv.shape)
 
     elif rank_n > 0 and rank_s == 0:
         X_conv =  conv(X, kernel_nn[0]).squeeze(-1)
@@ -741,7 +744,7 @@ def spectral_penalty(y_pred, y_true=None, y_true_fft=None, n_fft=None, smoothing
     RH 2021
     """
     if passthrough:
-        return 0
+        return torch.tensor(0.)
 
     if y_true is not None:
         y_true_fft = torch.abs(torch.fft.rfft(y_true, dim=0))
@@ -849,8 +852,9 @@ def L2_penalty(B_cp, lambda_L2):
     return penalty
 
 def diff_highOrder(traces, order):
+    buffer = torch.zeros(traces.shape[1:], device=traces.device).unsqueeze(0)
     for ii in range(order):
-        traces = torch.diff(traces, dim=0)
+        traces = torch.diff(traces, dim=0, prepend=buffer, append=buffer)
     return traces
 def smoothness_penalty(Bcp_w, derivative_order=2, lambda_smooth=1):
     """

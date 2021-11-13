@@ -288,7 +288,7 @@ def gaussian(x, mu, sig , plot_pref=False):
 
 
 # @torch.jit.script
-def conv(X, kernels):
+def conv(X, kernels, **conv1d_kwargs):
     """
     Convolution of X with kernels
     RH 2021
@@ -327,7 +327,7 @@ def conv(X, kernels):
 
     # print(X_rshp.dtype)
     # print(kernel_rshp.dtype)
-    convolved = torch.nn.functional.conv1d(X_rshp, kernel_rshp)  
+    convolved = torch.nn.functional.conv1d(X_rshp, kernel_rshp, **conv1d_kwargs)  
    
     convolved_rshp = convolved.permute(2, 0, 1).reshape((conv_out_shape)) # (T, D, R, C)
 
@@ -704,7 +704,7 @@ def forward_model(X:torch.Tensor, kernel:list, shifter, Bcp:list, weights, non_n
     rank_s = kernel_nn[1].shape[1] if kernel_nn[1].ndim > 1 else kernel[1].ndim
 
     if rank_n > 0 and rank_s > 0:
-        X_conv =  [conv(X, kernel_nn[0]).squeeze(-1)[..., None]]
+        X_conv =  [conv(X, kernel_nn[0]).squeeze(-1)]
         # X_conv[0] = X_conv[0].squeeze(-1)[..., None]
         # X_conv += [complex_magnitude(conv(X, kernel_nn[1]))]
         # X_conv[1] = complex_magnitude(X_conv[1])
@@ -716,8 +716,13 @@ def forward_model(X:torch.Tensor, kernel:list, shifter, Bcp:list, weights, non_n
                                           for shift in [0,90] ],
                                         dim=-1),
                              dim=-1)]
-
-        X_conv = torch.stack(X_conv, dim=-1)
+        # print(X_conv[0].shape, X_conv[1].shape)
+        
+        for ii,x in enumerate(X_conv):
+            if x.ndim < 3:
+                X_conv[ii] = x[..., None]
+        X_conv = torch.cat(X_conv, dim=-1)
+        # print(X_conv.shape)
 
     elif rank_n > 0 and rank_s == 0:
         X_conv =  conv(X, kernel_nn[0]).squeeze(-1)
@@ -756,7 +761,7 @@ def spectral_penalty(y_pred, y_true=None, y_true_fft=None, n_fft=None, smoothing
     RH 2021
     """
     if passthrough:
-        return 0
+        return torch.tensor(0.)
 
     if y_true is not None:
         y_true_fft = torch.abs(torch.fft.rfft(y_true, dim=0))
@@ -864,8 +869,9 @@ def L2_penalty(B_cp, lambda_L2):
     return penalty
 
 def diff_highOrder(traces, order):
+    buffer = torch.zeros(traces.shape[1:], device=traces.device).unsqueeze(0)
     for ii in range(order):
-        traces = torch.diff(traces, dim=0)
+        traces = torch.diff(traces, dim=0, prepend=buffer, append=buffer)
     return traces
 def smoothness_penalty(Bcp_w, derivative_order=2, lambda_smooth=1):
     """
@@ -1857,7 +1863,7 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
             if self.rank_spectral == 1:
                 Bcp_w_final[1] = Bcp_w_final[1][:,None]
             axs[kk+ii+jj+3].clear()
-            axs[kk+ii+jj+3].plot(Bcp_w_final[1][:,kk,:].squeeze())
+            axs[kk+ii+jj+3].plot(Bcp_w_final[1][:,kk].squeeze())
             axs[kk+ii+jj+3].set_title(f'factor {kk+1}')
 
         fig.canvas.draw()
