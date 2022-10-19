@@ -256,8 +256,8 @@ class CP_logistic_regression():
                 Device to run the model on.
         """        
 
-        self.X = torch.tensor(X, dtype=torch.float32).to(device)
-        self.y = torch.tensor(y, dtype=torch.long).to(device)
+        self.X = torch.as_tensor(X, dtype=torch.float32).to(device)
+        self.y = torch.as_tensor(y, dtype=torch.long).to(device)
         
         if weights is None:
             self.weights = torch.ones((rank), device=device)
@@ -337,9 +337,9 @@ class CP_logistic_regression():
 
         if LBFGS_kwargs is None:
             {
-                'lr' : 1, 
+                'lr' : 10000, 
                 'max_iter' : 20, 
-                'max_eval' : 20, 
+                'max_eval' : None, 
                 'tolerance_grad' : 1e-07, 
                 'tolerance_change' : 1e-09, 
                 'history_size' : 100, 
@@ -517,24 +517,24 @@ class CP_logistic_regression():
 
         logit = model(X, Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs).detach().cpu().numpy()
         pred = np.argmax(logit, axis=1)
-        pred_onehot = idx_to_oneHot(pred, self.n_classes)
+        # pred_onehot = idx_to_oneHot(pred, self.n_classes)
 
-        cm, acc = self.make_confusion_matrix(prob_or_pred='pred', pred=pred, y_true=y_true)
+        # cm, acc = self.make_confusion_matrix(prob_or_pred='pred', pred=pred, y_true=y_true)
 
-        if plot_pref:
-            fig, axs = plt.subplots(2)
-            axs[0].imshow(idx_to_oneHot(pred, self.n_classes), aspect='auto', interpolation='none')
-            axs[1].imshow(idx_to_oneHot(y_true, self.n_classes), aspect='auto', interpolation='none')
-            axs[1].set_xlabel('class')
-            fig.suptitle('predictions')
+        # if plot_pref:
+        #     fig, axs = plt.subplots(2)
+        #     axs[0].imshow(idx_to_oneHot(pred, self.n_classes), aspect='auto', interpolation='none')
+        #     axs[1].imshow(idx_to_oneHot(y_true, self.n_classes), aspect='auto', interpolation='none')
+        #     axs[1].set_xlabel('class')
+        #     fig.suptitle('predictions')
 
-            fig = plt.figure()
-            plt.imshow(cm)
-            plt.ylabel('true class')
-            plt.xlabel('predicted class')
-            plt.title('confusion matrix (predictions)')
+        #     fig = plt.figure()
+        #     plt.imshow(cm)
+        #     plt.ylabel('true class')
+        #     plt.xlabel('predicted class')
+        #     plt.title('confusion matrix (predictions)')
             
-        return logit, pred, cm, acc
+        return logit, pred
 
     
     def return_Bcp_final(self):
@@ -576,8 +576,9 @@ class CP_logistic_regression():
                 Accuracy of the model.
         """
         if (prob is None) and (pred is None):
-            prob, pred, cm, acc = self.predict()
-        
+            prob, pred = self.predict()
+            cm, acc = self.make_confusion_matrix(prob_or_pred='pred', pred=pred, y_true=y_true)
+
         if y_true is None:
             y_true = self.y.detach().cpu().numpy()
         

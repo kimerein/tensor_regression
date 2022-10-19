@@ -467,11 +467,13 @@ def complex_magnitude(convolved):
 #                         Bcp_nn[2]) + bias
 #     return X_1c
 
-@torch.jit.script
+# @torch.jit.script
 def slmm_helper(X, Bcp_0, Bcp_1, bias):
-    return torch.einsum('tr,nr -> tn',
-                                torch.einsum('tdr,dr -> tr', X, Bcp_0),
-                        Bcp_1) + bias
+    # return torch.einsum('tr,nr -> tn',
+    #                             torch.einsum('tdr,dr -> tr', X, Bcp_0),
+    #                     Bcp_1) + bias
+
+    return torch.sum(X * Bcp_0[None,:,:], dim=1) @ Bcp_1.T + bias
 def stepwise_linear_model_multirank(X, Bcp, weights, bias):
     """
     Computes regression model in a stepwise manner.
@@ -740,6 +742,66 @@ def forward_model(X:torch.Tensor, kernel:list, shifter, Bcp:list, weights, non_n
     pred =  stepwise_linear_model_multirank(X_conv, Bcp_nn, weights, bias)
 
     return pred
+
+# def forward_model_lowMemory(X:torch.Tensor, kernel:list, shifter, Bcp:list, weights, non_negative, bias, softplus_kwargs=None):
+#     """
+
+#     RH 2021
+#     """
+
+#     kernel_nn = list(non_neg_fn(kernel, [non_negative[0]]*2, softplus_kwargs))
+#     Bcp_nn = list(non_neg_fn(Bcp, non_negative[1:], softplus_kwargs))
+
+#     rank_n = kernel_nn[0].shape[1] if kernel_nn[0].ndim > 1 else kernel[0].ndim
+#     rank_s = kernel_nn[1].shape[1] if kernel_nn[1].ndim > 1 else kernel[1].ndim
+
+#     for iter_rank in range(rank_n + rank_s):
+#         if rank_n > 0 and rank_s > 0:
+#             X_conv =  [conv(X, kernel_nn[0][:,iter_rank][:,None]).squeeze(-1)]
+#             # X_conv[0] = X_conv[0].squeeze(-1)[..., None]
+#             # X_conv += [complex_magnitude(conv(X, kernel_nn[1]))]
+#             # X_conv[1] = complex_magnitude(X_conv[1])
+#             X_conv += [torch.norm(torch.stack([ conv(X,
+#                                                 shifter(kernel_nn[1][:,iter_rank][:,None],
+#                                                         shift_angle=shift,
+#                                                         deg_or_rad='deg',
+#                                                         dim=0)).squeeze(-1)
+#                                             for shift in [0,90] ],
+#                                             dim=-1),
+#                                 dim=-1)]
+#             # print(X_conv[0].shape, X_conv[1].shape)
+            
+#             for ii,x in enumerate(X_conv):
+#                 if x.ndim < 3:
+#                     X_conv[ii] = x[..., None]
+#             X_conv = torch.cat(X_conv, dim=-1)
+#             # print(X_conv.shape)
+
+#         elif rank_n > 0 and rank_s == 0:
+#             X_conv =  conv(X, kernel_nn[0][:,iter_rank][:,None]).squeeze(-1)
+
+#         elif rank_n == 0 and rank_s > 0:
+#             X_conv = torch.norm(torch.stack([ conv(X,
+#                                                 shifter(kernel_nn[1][:,iter_rank][:,None],
+#                                                         shift_angle=shift,
+#                                                         deg_or_rad='deg',
+#                                                         dim=0)).squeeze(-1)
+#                                             for shift in [0,90] ],
+#                                             dim=-1),
+#                                 dim=-1)
+
+#         if iter_rank == 0:
+#             pred = stepwise_linear_model_multirank(X_conv[...,None],
+#                                                 [Bcp_nn[ii][:,iter_rank][:,None] for ii in range(len(Bcp_nn))],
+#                                                 weights,
+#                                                 bias)
+#         else:
+#             pred += stepwise_linear_model_multirank(X_conv[...,None],
+#                                                 [Bcp_nn[ii][:,iter_rank][:,None] for ii in range(len(Bcp_nn))],
+#                                                 weights,
+#                                                 bias)
+
+#     return pred
 
 def spectral_penalty(y_pred, y_true=None, y_true_fft=None, n_fft=None, smoothing_kernel=None, passthrough=False, lam=0, plot_pref=False):
     """
@@ -1351,7 +1413,7 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
             return loss_all, loss_rec.item(), loss_L2_w.item(), loss_L2_n.item(), loss_spectral.item(), loss_smoothness.item()
 
         if verbose==3:
-            self.fig, self.axs = plt.subplots(1 + len(self.Bcp_n) + self.rank_spectral + self.rank_normal, figsize=(7,20))
+            self.fig, self.axs = plt.subplots(2 + len(self.Bcp_n) + self.rank_spectral + self.rank_normal, figsize=(7,20))
 
         def print_info(iter, loss_all, loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio, precis=5):
             print(f'Iter: {iter}, \
@@ -1376,7 +1438,8 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
             if verbose==2:
                 print_info(ii, self.loss_running[-1], loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio=torch.var(y_hat.detach()).item() / torch.var(y).item())            
             elif verbose==3:
-                self.update_plot_outputs(self.fig, self.axs)
+                if ii%plotting_interval==0:
+                    self.update_plot_outputs(self.fig, self.axs)
                 # plt.pause(0.01)
                 print_info(ii, self.loss_running[-1], loss_rec, loss_L2_w, loss_L2_n, loss_spectral, loss_smoothness, variance_ratio=torch.var(y_hat.detach()).item() / torch.var(y).item())            
             if len(self.loss_running) > patience:
@@ -1609,7 +1672,7 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
             for ii in range(len(Bcp[1])):
                 Bcp_w[ii] = Bcp[1][ii].to(device)
         
-        y_hat = forward_model(X, self.Bcp_w, self.shifter, self.Bcp_n, self.weights[:self.rank_normal], self.non_negative, self.bias, self.softplus_kwargs)
+        y_hat = forward_model(X, self.Bcp_w, self.shifter, self.Bcp_n, self.weights, self.non_negative, self.bias, self.softplus_kwargs)
 
         return y_hat.cpu().detach()
 
@@ -1755,7 +1818,8 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
                 'spectral_smoothing_kernel': self.spectral_smoothing_kernel.detach().cpu().numpy(),
                 'temporal_window': self.temporal_window,
                 'do_spectralPenalty': self.do_spectralPenalty,
-                'loss_running': self.loss_running
+                'loss_running': self.loss_running,
+                'shifter': self.shifter,
                 }
 
     def set_params(self, params):
@@ -1781,6 +1845,7 @@ var_ratio (y_hat/y_true): {variance_ratio:.{precis}}')
         self.temporal_window = params['temporal_window']
         self.do_spectralPenalty = params['do_spectralPenalty']
         self.loss_running = params['loss_running']
+        self.shifter = params['shifter']
 
 
     def display_params(self):
