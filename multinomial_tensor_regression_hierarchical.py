@@ -109,7 +109,6 @@ def make_BcpInit(B_dims, rank, non_negative, scale=1, device='cpu'):
             Beta Kruskal tensor.
     """
     Bcp_init = [(torch.rand((B_dims[ii], rank))*scale - (1-non_negative[ii])*(scale/2)).to(device) for ii in range(len(B_dims))]
-    # Bcp_init = [(torch.ones((B_dims[ii], rank))*0.5 - (1-non_negative[ii])*(scale/2)).to(device) for ii in range(len(B_dims))] # KER for debugging of lr == 0, initialize as uniform 0.5
     for ii in range(len(B_dims)):
         Bcp_init[ii].requires_grad = True
     return Bcp_init
@@ -449,7 +448,8 @@ class CP_logistic_regression():
         convergence_reached = False
         for ii in range(max_iter):
             # change learning rate
-            # optimizer.param_groups[1]['lr'] = Adam_kwargs['lr']
+            # if ii > 2000: 
+            #    optimizer.param_groups[2]['lr'] = Adam_kwargs['lr']
             optimizer.zero_grad()
             y_hat = model(self.X, self.Bcp, self.weights, self.non_negative, softplus_kwargs=self.softplus_kwargs)
             loss = loss_fn(y_hat, self.y) + lambda_L2 * L2_penalty(self.Bcp)
