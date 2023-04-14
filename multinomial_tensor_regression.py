@@ -45,7 +45,6 @@ def confusion_matrix(y_hat, y_true):
     Compute the confusion matrix from y_hat and y_true.
     y_hat should be either predictions ().
     RH 2021
-
     Args:
         y_hat (np.ndarray): 
             numpy array of predictions or probabilities. 
@@ -68,7 +67,6 @@ def idx_to_oneHot(arr, n_classes=None):
     Convert an array of class indices to matrix of
      one-hot vectors.
     RH 2021
-
     Args:
         arr (np.ndarray):
             1-D array of class indices.
@@ -118,7 +116,6 @@ def non_neg_fn(B_cp, non_negative, softplus_kwargs=None):
     Apply softplus to specified dimensions of Bcp.
     Generator function that yields a list of tensors.
     RH 2021
-
     Args:
         B_cp (list of torch.Tensor):
             Beta Kruskal tensor (before softplus).
@@ -158,7 +155,6 @@ def model(X, Bcp, weights, non_negative, softplus_kwargs=None):
         inner prod is performed on dims [1:] of X and
          dims [:-1] of Bcp.
     RH 2021
-
     Args:
         X (torch.Tensor):
             N-D array of data.
@@ -192,7 +188,6 @@ def L2_penalty(B_cp):
     """
     Compute the L2 penalty.
     RH 2021
-
     Args:
         B_cp (list of torch.Tensor):
             Beta Kruskal tensor (before softplus)
@@ -221,7 +216,6 @@ class CP_logistic_regression():
          manually if they wish. Mean subtracting X along
          one dimension is recommended.
         RH 2021
-
         Args:
             X (np.ndarray or torch.Tensor):
                 Input data. First dimension must match len(y).
@@ -294,6 +288,7 @@ class CP_logistic_regression():
             max_iter=1000, 
             tol=1e-5, 
             patience=10,
+            weights=None,
             verbose=False,
             running_loss_logging_interval=10, 
             LBFGS_kwargs=None):
@@ -309,7 +304,6 @@ class CP_logistic_regression():
          large, then set running_loss_logging_interval to a
          large number.
         RH 2021
-
         Args:
             lambda_L2 (float):
                 L2 regularization parameter.
@@ -320,6 +314,11 @@ class CP_logistic_regression():
             patience (int):
                 Number of iterations with no improvement to wait
                  before early stopping.
+            weights (np.array):
+                Weights for each class.
+                If None, then all classes are weighted equally.
+                To balance the classes, set weights to be the
+                 the inverse of the class counts.
             verbose (0, 1, or 2):
                 If 0, then no output.
                 If 1, then only output whether the model has
@@ -357,7 +356,9 @@ class CP_logistic_regression():
             loss.backward()
             return loss
             
-        loss_fn = torch.nn.CrossEntropyLoss()
+        loss_fn = torch.nn.CrossEntropyLoss(
+            weight=torch.as_tensor(weights, dtype=torch.float32).to(self.device)
+        )
 
         convergence_reached = False
         for ii in range(max_iter):
@@ -385,6 +386,7 @@ class CP_logistic_regression():
             max_iter=1000, 
             tol=1e-5, 
             patience=10,
+            weights=None,
             verbose=False,
             Adam_kwargs=None):
         """
@@ -399,7 +401,6 @@ class CP_logistic_regression():
          large, then set running_loss_logging_interval to a
          large number.
         RH 2021
-
         Args:
             lambda_L2 (float):
                 L2 regularization parameter.
@@ -410,6 +411,11 @@ class CP_logistic_regression():
             patience (int):
                 Number of iterations with no improvement to wait
                  before early stopping.
+            weights (np.array):
+                Weights for each class.
+                If None, then all classes are weighted equally.
+                To balance the classes, set weights to be the
+                 the inverse of the class counts.
             verbose (0, 1, or 2):
                 If 0, then no output.
                 If 1, then only output whether the model has
@@ -434,7 +440,9 @@ class CP_logistic_regression():
         tl.set_backend('pytorch')
 
         optimizer = torch.optim.Adam(self.Bcp, **Adam_kwargs)
-        loss_fn = torch.nn.CrossEntropyLoss()
+        loss_fn = torch.nn.CrossEntropyLoss(
+            weight=torch.as_tensor(weights, dtype=torch.float32).to(self.device),
+        )
 
         convergence_reached = False
         for ii in range(max_iter):
@@ -458,12 +466,11 @@ class CP_logistic_regression():
         return convergence_reached
 
 
-    def predict(self, X=None, y_true=None, Bcp=None, device=None, plot_pref=False):
+    def predict(self, X=None, y_true=None, Bcp=None, device=None):
         """
         Predict class labels for X given a Bcp (beta Kruskal tensor).
         Uses 'model' function in this module.
         RH 2021
-
         Args:
             X (np.ndarray or torch.Tensor):
                 Input data. First dimension must match len(y).
@@ -479,9 +486,6 @@ class CP_logistic_regression():
                  what the model was trained on.
             device (str):
                 Device to run the model on.
-            plot_pref (bool):
-                If True, then make plots
-        
         Returns:
             logits (np.ndarray):
                 Raw output of the model.
@@ -542,7 +546,6 @@ class CP_logistic_regression():
         Return the final Kruskal tensor as a numpy array.
         Simply passes self.Bcp to non_neg_fn.
         RH 2021
-
         Returns:
             Bcp_nonNeg (np.ndarray):
                 Final Kruskal tensor. Ready to multiply by the
@@ -558,7 +561,6 @@ class CP_logistic_regression():
         If 'prob' and 'pred' are None, then they will
          be calculated using self.predict().
         RH 2021
-
         Args:
             prob_or_pred (str):
                 'prob' or 'pred'. If 'prob', then use the
@@ -568,7 +570,6 @@ class CP_logistic_regression():
                 Probabilities of the model.
             pred (np.ndarray):
                 Predicted class labels.
-
         Returns:
             cm (np.ndarray):
                 Confusion matrix.
@@ -595,7 +596,6 @@ class CP_logistic_regression():
         """
         Detach the Bcp Kruskal tensor list.
         RH 2021
-
         Returns:
             Bcp_detached (list of np.ndarray):
                 Detached Bcp tensors.
@@ -623,7 +623,6 @@ class CP_logistic_regression():
         """
         Set the parameters of the model.
         RH 2021
-
         Args:
             params (dict):
                 Dictionary of parameters.
@@ -666,7 +665,7 @@ class CP_logistic_regression():
         plt.ylabel('loss')
         plt.title('loss')
 
-        prob, pred, cm, acc = self.predict()
+        logit, pred = self.predict()
         fig, axs = plt.subplots(2)
         axs[0].imshow(idx_to_oneHot(pred, self.n_classes), aspect='auto', interpolation='none')
         axs[1].imshow(idx_to_oneHot(self.y.detach().cpu().numpy(), self.n_classes), aspect='auto', interpolation='none')
