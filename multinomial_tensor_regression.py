@@ -684,4 +684,9 @@ class CP_logistic_regression():
         for ii, val in enumerate(Bcp_final):
             axs[ii].set_title(f'factor {ii}')
             axs[ii].plot(val)
+        # Stretch plot height to make it taller
+        #height_ratio = [1, 4, 1]
+        #gs=plt.GridSpec(3,1,height_ratios=height_ratio)
+        #axs[1].set_subplotspec(gs[1])
+
         fig.suptitle('components');
