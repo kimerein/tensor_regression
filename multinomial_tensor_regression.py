@@ -283,6 +283,9 @@ class CP_logistic_regression():
 
         self.loss_running = []
 
+    def return_self(self):
+        return self.Bcp
+
     def fit(self,
             lambda_L2=0.01, 
             max_iter=1000, 
