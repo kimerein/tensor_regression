@@ -9,6 +9,8 @@ from torch.optim import LBFGS
 
 import tensorly as tl
 
+tl.set_backend('pytorch')
+
 ####################################
 ######## Useful functions ##########
 ####################################
@@ -511,7 +513,6 @@ class CP_logistic_regression():
 
         if y_true is None:
             y_true = self.y.detach().cpu().numpy()
-
                         
         if Bcp is None:
             Bcp = self.Bcp
